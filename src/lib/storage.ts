@@ -5,8 +5,9 @@
  */
 
 import { PuttingShotData, UserProfile, DistanceBagBucket } from './types';
+import { getTourMakePct } from './calculations';
 
-const STORAGE_KEY_SHOTS = 'squareputt_history_v1';
+const STORAGE_KEY_SHOTS = 'squareputt_history_v2'; // v2: new shot schema
 const STORAGE_KEY_ACTIVE_PROFILE = 'squareputt_active_profile_v1';
 const STORAGE_KEY_DRILL_BESTS = 'squareputt_drill_bests_v1';
 
@@ -22,7 +23,7 @@ export interface DrillBests {
     lastUpdated: number;
   };
   scrambleGauntlet: {
-    highestStrokesGained: number;
+    highestStrokesGained: number; // best strokes gained per 18 holes
     lowestCepInches: number;
     lastUpdated: number;
   };
@@ -30,8 +31,8 @@ export interface DrillBests {
 
 const DEFAULT_PROFILE: UserProfile = {
   id: 'default_user',
-  name: 'Tour Pro',
-  handicap: 2.4,
+  name: 'Golfer',
+  handicap: 10,
   preferredStimp: 10.5,
   createdAt: new Date().toISOString(),
 };
@@ -70,8 +71,9 @@ export function saveShotToHistory(shot: PuttingShotData): void {
   if (typeof window === 'undefined') return;
   try {
     const current = getStoredShots();
-    // Keep most recent 300 shots to prevent localstorage bloat
-    const updated = [shot, ...current].slice(0, 300);
+    // Trajectories are large and only needed for the live animation.
+    const slim: PuttingShotData = { ...shot, trajectoryPoints: undefined, trajectoryDt: undefined };
+    const updated = [slim, ...current].slice(0, 1000);
     localStorage.setItem(STORAGE_KEY_SHOTS, JSON.stringify(updated));
   } catch (e) {
     console.error('Failed to save shot to localStorage', e);
@@ -115,6 +117,28 @@ export function updateDrillBests(partial: Partial<DrillBests>): void {
   try {
     const current = getDrillBests();
     const updated = { ...current, ...partial };
+    // keep the better value of each personal best
+    if (partial.pressureCircle) {
+      updated.pressureCircle = {
+        bestStreak: Math.max(current.pressureCircle.bestStreak, partial.pressureCircle.bestStreak),
+        lowestFaceStdDev: Math.min(current.pressureCircle.lowestFaceStdDev, partial.pressureCircle.lowestFaceStdDev || 999),
+        lastUpdated: Date.now(),
+      };
+    }
+    if (partial.speedControl) {
+      updated.speedControl = {
+        highScore: Math.max(current.speedControl.highScore, partial.speedControl.highScore),
+        lowestSpeedStdDev: Math.min(current.speedControl.lowestSpeedStdDev, partial.speedControl.lowestSpeedStdDev || 999),
+        lastUpdated: Date.now(),
+      };
+    }
+    if (partial.scrambleGauntlet) {
+      updated.scrambleGauntlet = {
+        highestStrokesGained: Math.max(current.scrambleGauntlet.highestStrokesGained, partial.scrambleGauntlet.highestStrokesGained),
+        lowestCepInches: Math.min(current.scrambleGauntlet.lowestCepInches, partial.scrambleGauntlet.lowestCepInches || 999),
+        lastUpdated: Date.now(),
+      };
+    }
     localStorage.setItem(STORAGE_KEY_DRILL_BESTS, JSON.stringify(updated));
   } catch (e) {
     console.error('Failed to update drill bests', e);
@@ -138,6 +162,7 @@ export function calculateBagMapping(shots: PuttingShotData[]): DistanceBagBucket
         attempts: 0,
         makes: 0,
         makeRatePct: 0,
+        tourMakeRatePct: Math.round(getTourMakePct((bucket.min + bucket.max) / 2)),
         avgMissDistanceInches: 0,
         avgFaceAngleDeg: 0,
         avgSpeedMph: 0,
@@ -148,8 +173,8 @@ export function calculateBagMapping(shots: PuttingShotData[]): DistanceBagBucket
     const makeRatePct = Number(((makes / bucketShots.length) * 100).toFixed(1));
     const avgMissDistanceInches = Number(
       (
-        bucketShots.reduce((sum, s) => sum + Math.abs(s.lateralErrorInches), 0) /
-        bucketShots.length
+        bucketShots.filter((s) => !s.isHoled).reduce((sum, s) => sum + (s.leaveFt ?? 0) * 12, 0) /
+        Math.max(1, bucketShots.filter((s) => !s.isHoled).length)
       ).toFixed(1)
     );
     const avgFaceAngleDeg = Number(
@@ -170,6 +195,7 @@ export function calculateBagMapping(shots: PuttingShotData[]): DistanceBagBucket
       attempts: bucketShots.length,
       makes,
       makeRatePct,
+      tourMakeRatePct: Math.round(getTourMakePct((bucket.min + bucket.max) / 2)),
       avgMissDistanceInches,
       avgFaceAngleDeg,
       avgSpeedMph,
@@ -201,7 +227,7 @@ export function importSessionData(jsonString: string): boolean {
     if (parsed.profile) saveActiveProfile(parsed.profile);
     if (parsed.drillBests) updateDrillBests(parsed.drillBests);
     if (Array.isArray(parsed.shots)) {
-      localStorage.setItem(STORAGE_KEY_SHOTS, JSON.stringify(parsed.shots.slice(0, 300)));
+      localStorage.setItem(STORAGE_KEY_SHOTS, JSON.stringify(parsed.shots.slice(0, 1000)));
     }
     return true;
   } catch (e) {

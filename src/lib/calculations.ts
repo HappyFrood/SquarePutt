@@ -164,26 +164,43 @@ export function analyzeDynamicLoft(
 }
 
 /**
- * PGA Tour ShotLink Expected Putts Table (distance in feet)
- * Source: Broadie "Every Shot Counts" & PGA Tour baseline putting distribution
+ * PGA Tour baseline: average putts to hole out from a distance (ft).
+ * Source: Broadie, "Every Shot Counts" (ShotLink putting baseline). Linearly interpolated.
  */
+const TOUR_EXPECTED_PUTTS: [number, number][] = [
+  [0, 0], [1, 1.0], [2, 1.01], [3, 1.04], [4, 1.13], [5, 1.23], [6, 1.34], [7, 1.42],
+  [8, 1.5], [9, 1.56], [10, 1.61], [15, 1.78], [20, 1.87], [30, 1.98], [40, 2.06],
+  [50, 2.14], [60, 2.21], [90, 2.4],
+];
+
+/** Approximate PGA Tour one-putt percentage by distance (ft). */
+const TOUR_MAKE_PCT: [number, number][] = [
+  [2, 99], [3, 96], [4, 88], [5, 77], [6, 66], [7, 58], [8, 50], [9, 45], [10, 40],
+  [15, 23], [20, 15], [25, 10], [30, 7], [40, 4], [60, 2],
+];
+
+function interp(table: [number, number][], x: number): number {
+  if (x <= table[0][0]) return table[0][1];
+  for (let i = 1; i < table.length; i++) {
+    if (x <= table[i][0]) {
+      const [x0, y0] = table[i - 1];
+      const [x1, y1] = table[i];
+      return y0 + ((y1 - y0) * (x - x0)) / (x1 - x0);
+    }
+  }
+  return table[table.length - 1][1];
+}
+
 export function getPgaExpectedPutts(distanceFt: number): number {
-  if (distanceFt <= 1.0) return 1.00;
-  if (distanceFt <= 3.0) return 1.04;
-  if (distanceFt <= 5.0) return 1.23;
-  if (distanceFt <= 8.0) return 1.50;
-  if (distanceFt <= 10.0) return 1.62;
-  if (distanceFt <= 15.0) return 1.78;
-  if (distanceFt <= 20.0) return 1.88;
-  if (distanceFt <= 25.0) return 1.94;
-  if (distanceFt <= 30.0) return 1.98;
-  if (distanceFt <= 40.0) return 2.05;
-  if (distanceFt <= 50.0) return 2.14;
-  return 2.25;
+  return interp(TOUR_EXPECTED_PUTTS, Math.max(0, distanceFt));
+}
+
+export function getTourMakePct(distanceFt: number): number {
+  return interp(TOUR_MAKE_PCT, Math.max(0, distanceFt));
 }
 
 /**
- * Calculates Strokes Gained: Putting for a single shot
+ * Strokes gained for a single putt: expected(start) - 1 - expected(remaining).
  */
 export function calculateStrokesGained({
   startDistanceFt,
@@ -194,25 +211,40 @@ export function calculateStrokesGained({
   isHoled: boolean;
   remainingDistanceFt: number;
 }): number {
-  const expectedStart = getPgaExpectedPutts(startDistanceFt);
-  if (isHoled) {
-    // 1 stroke taken, 0 expected remaining
-    return Number((expectedStart - 1.0).toFixed(2));
-  }
-  const expectedRemaining = getPgaExpectedPutts(remainingDistanceFt);
-  // 1 stroke taken + expected remaining
-  const sg = expectedStart - 1.0 - expectedRemaining;
-  return Number(sg.toFixed(2));
+  const remaining = isHoled ? 0 : getPgaExpectedPutts(remainingDistanceFt);
+  return getPgaExpectedPutts(startDistanceFt) - 1 - remaining;
 }
 
-/**
- * Calculates Circular Error Probable (CEP 50%) in inches
- * The radius of a circle centered on the target containing 50% of shots.
- */
+/** Circular Error Probable (median miss radius) in inches. */
 export function calculateCepInches(deviations: { xInches: number; zInches: number }[]): number {
   if (deviations.length === 0) return 0;
-  const radii = deviations.map((d) => Math.sqrt(d.xInches * d.xInches + d.zInches * d.zInches));
-  radii.sort((a, b) => a - b);
-  const medianIndex = Math.floor(radii.length / 2);
-  return Number(radii[medianIndex].toFixed(1));
+  const radii = deviations.map((d) => Math.hypot(d.xInches, d.zInches)).sort((a, b) => a - b);
+  const mid = Math.floor(radii.length / 2);
+  const median = radii.length % 2 ? radii[mid] : (radii[mid - 1] + radii[mid]) / 2;
+  return Number(median.toFixed(1));
+}
+
+/** Grades ball speed versus the ideal speed for the putt (percent error). */
+export function gradeSpeedError(speedErrorPct: number): QuinticGrade {
+  const e = Math.abs(speedErrorPct);
+  if (e <= 3) return 'eagle';
+  if (e <= 6) return 'birdie';
+  if (e <= 10) return 'par';
+  return 'bogey';
+}
+
+/** Grades front-to-back distance dispersion (std dev, ft) for lag putting. */
+export function gradeDistanceDispersion(stdDevFt: number): QuinticGrade {
+  if (stdDevFt <= 1.0) return 'eagle';
+  if (stdDevFt <= 1.75) return 'birdie';
+  if (stdDevFt <= 2.75) return 'par';
+  return 'bogey';
+}
+
+/** Grades strokes gained per 18 holes. */
+export function gradeStrokesGainedPer18(sg18: number): QuinticGrade {
+  if (sg18 >= 0) return 'eagle';
+  if (sg18 >= -2) return 'birdie';
+  if (sg18 >= -4.5) return 'par';
+  return 'bogey';
 }

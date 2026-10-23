@@ -1,296 +1,247 @@
 /**
- * SquarePutt Audio Synthesizer (Web Audio API)
- * High-fidelity procedural acoustic sound engine for:
- * 1. Solid milled putter face strike ("click-thock")
- * 2. Divine golf ball falling in regulation cup (lip clip, bottom plate clack, multi-bounce rattle, and pin ferrule chatter)
- * 3. Milestone celebratory chimes
+ * SquarePutt sound.
+ *
+ * Cup drop is physically modelled rather than "beeped": the ball falls ~85 mm onto the
+ * plastic cup bottom (≈130 ms), then rebounds with a coefficient of restitution of ~0.45,
+ * so impacts come closer together and quieter (118 ms, 53 ms, 24 ms…). Each impact is a
+ * very short noise burst ringing a small bank of resonators tuned to a hollow plastic cup.
+ * Every drop is slightly randomized so it never sounds canned.
+ *
+ * To use a recording instead, place an audio file at /public/sounds/cup-drop.mp3.
  */
+
+const CUP_SAMPLE_URL = '/sounds/cup-drop.mp3';
 
 class AudioSynthesizer {
   private ctx: AudioContext | null = null;
-  private soundEnabled = true;
-  private noiseBuffer: AudioBuffer | null = null;
-  private unlocked = false;
+  private enabled = true;
+  private noise: AudioBuffer | null = null;
+  private master: GainNode | null = null;
+  private cupSample: AudioBuffer | null = null;
+  private sampleTried = false;
 
   constructor() {
-    if (typeof window !== 'undefined') {
-      const unlock = () => {
-        if (!this.unlocked) {
-          this.initCtx();
-          this.unlocked = true;
-          window.removeEventListener('pointerdown', unlock);
-          window.removeEventListener('keydown', unlock);
-          window.removeEventListener('touchstart', unlock);
-        }
-      };
-      window.addEventListener('pointerdown', unlock, { passive: true });
-      window.addEventListener('keydown', unlock, { passive: true });
-      window.addEventListener('touchstart', unlock, { passive: true });
+    if (typeof window === 'undefined') return;
+    try {
+      this.enabled = localStorage.getItem('squareputt_sound') !== 'off';
+    } catch {
+      /* ignore */
     }
+    const unlock = () => {
+      this.init();
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+    };
+    window.addEventListener('pointerdown', unlock, { passive: true });
+    window.addEventListener('keydown', unlock, { passive: true });
   }
 
-  public initCtx(): AudioContext | null {
+  private init(): AudioContext | null {
     if (typeof window === 'undefined') return null;
     if (!this.ctx) {
-      const AudioCtx =
-        window.AudioContext ||
-        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-      if (AudioCtx) {
-        this.ctx = new AudioCtx();
-      }
+      const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return null;
+      this.ctx = new Ctor();
+      const comp = this.ctx.createDynamicsCompressor();
+      comp.threshold.value = -10;
+      comp.ratio.value = 4;
+      comp.attack.value = 0.001;
+      comp.release.value = 0.1;
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.9;
+      this.master.connect(comp);
+      comp.connect(this.ctx.destination);
+      this.loadSample();
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {});
-    }
+    if (this.ctx.state === 'suspended') this.ctx.resume().catch(() => {});
     return this.ctx;
   }
 
-  public setEnabled(enabled: boolean): void {
-    this.soundEnabled = enabled;
-  }
-
-  public isEnabled(): boolean {
-    return this.soundEnabled;
-  }
-
-  /**
-   * Generates or retrieves cached white noise buffer for realistic physical contact clicks
-   */
-  private getNoiseBuffer(ctx: AudioContext): AudioBuffer {
-    if (!this.noiseBuffer || this.noiseBuffer.sampleRate !== ctx.sampleRate) {
-      const sampleRate = ctx.sampleRate;
-      const bufferSize = sampleRate * 0.5; // 500ms
-      const buffer = ctx.createBuffer(1, bufferSize, sampleRate);
-      const data = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        data[i] = Math.random() * 2 - 1;
-      }
-      this.noiseBuffer = buffer;
+  private async loadSample() {
+    if (this.sampleTried || !this.ctx) return;
+    this.sampleTried = true;
+    try {
+      const res = await fetch(CUP_SAMPLE_URL);
+      if (!res.ok) return;
+      const buf = await res.arrayBuffer();
+      this.cupSample = await this.ctx.decodeAudioData(buf);
+    } catch {
+      /* no sample — use the synthesized drop */
     }
-    return this.noiseBuffer;
   }
 
-  /**
-   * Putter strike sound: Solid milled putter face strike "click-thud"
-   */
-  public playPutterStrike(): void {
-    if (!this.soundEnabled) return;
-    const ctx = this.initCtx();
-    if (!ctx) return;
-
-    const now = ctx.currentTime;
-    const master = ctx.createGain();
-    master.gain.setValueAtTime(0.7, now);
-    master.connect(ctx.destination);
-
-    // 1. Transient contact click (noise burst)
-    const noise = ctx.createBufferSource();
-    noise.buffer = this.getNoiseBuffer(ctx);
-    const noiseFilter = ctx.createBiquadFilter();
-    noiseFilter.type = 'bandpass';
-    noiseFilter.frequency.setValueAtTime(2400, now);
-    noiseFilter.Q.setValueAtTime(3.5, now);
-
-    const noiseGain = ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.45, now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.022);
-
-    noise.connect(noiseFilter);
-    noiseFilter.connect(noiseGain);
-    noiseGain.connect(master);
-    noise.start(now);
-    noise.stop(now + 0.03);
-
-    // 2. High transient metallic click
-    const clickOsc = ctx.createOscillator();
-    const clickGain = ctx.createGain();
-    clickOsc.type = 'triangle';
-    clickOsc.frequency.setValueAtTime(1450, now);
-    clickOsc.frequency.exponentialRampToValueAtTime(380, now + 0.038);
-
-    clickGain.gain.setValueAtTime(0.4, now);
-    clickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.045);
-
-    clickOsc.connect(clickGain);
-    clickGain.connect(master);
-    clickOsc.start(now);
-    clickOsc.stop(now + 0.05);
-
-    // 3. Deep ball compression core thud
-    const thudOsc = ctx.createOscillator();
-    const thudGain = ctx.createGain();
-    thudOsc.type = 'sine';
-    thudOsc.frequency.setValueAtTime(260, now);
-    thudOsc.frequency.exponentialRampToValueAtTime(75, now + 0.085);
-
-    thudGain.gain.setValueAtTime(0.5, now);
-    thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.095);
-
-    thudOsc.connect(thudGain);
-    thudGain.connect(master);
-    thudOsc.start(now);
-    thudOsc.stop(now + 0.1);
+  setEnabled(on: boolean) {
+    this.enabled = on;
+    try {
+      localStorage.setItem('squareputt_sound', on ? 'on' : 'off');
+    } catch {
+      /* ignore */
+    }
   }
 
-  /**
-   * The divine sound of a golf ball falling into the cup:
-   * Layered physical acoustics:
-   * - Lip clip transient
-   * - Primary heavy bottom plate strike ("CLACK")
-   * - Hollow cylinder acoustic body resonance
-   * - 3 natural secondary plastic rebounds / rattle
-   * - Subtle pin flagstick ferrule chatter
-   */
-  public playCupDrop(): void {
-    if (!this.soundEnabled) return;
-    const ctx = this.initCtx();
-    if (!ctx) return;
-
-    const now = ctx.currentTime;
-
-    // Master Compressor / Limiter for punchy, rich, crisp acoustic impact
-    const compressor = ctx.createDynamicsCompressor();
-    compressor.threshold.setValueAtTime(-8, now);
-    compressor.knee.setValueAtTime(6, now);
-    compressor.ratio.setValueAtTime(5, now);
-    compressor.attack.setValueAtTime(0.001, now);
-    compressor.release.setValueAtTime(0.08, now);
-
-    const masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(0.9, now);
-
-    compressor.connect(masterGain);
-    masterGain.connect(ctx.destination);
-
-    // Helper: Trigger a contact click + resonant tone for each bounce
-    const playBounce = (timeOffset: number, baseFreq: number, gainLevel: number, decaySec: number, noiseFreq: number) => {
-      const t = now + timeOffset;
-
-      // A. Resonant body strike
-      const osc = ctx.createOscillator();
-      const oscGain = ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(baseFreq, t);
-      osc.frequency.exponentialRampToValueAtTime(baseFreq * 0.45, t + decaySec);
-
-      oscGain.gain.setValueAtTime(gainLevel, t);
-      oscGain.gain.exponentialRampToValueAtTime(0.001, t + decaySec);
-
-      osc.connect(oscGain);
-      oscGain.connect(compressor);
-      osc.start(t);
-      osc.stop(t + decaySec);
-
-      // B. Hollow cup cylinder resonance harmonic
-      const harmOsc = ctx.createOscillator();
-      const harmGain = ctx.createGain();
-      harmOsc.type = 'sine';
-      harmOsc.frequency.setValueAtTime(baseFreq * 1.85, t);
-      harmOsc.frequency.exponentialRampToValueAtTime(baseFreq * 0.9, t + decaySec * 0.8);
-
-      harmGain.gain.setValueAtTime(gainLevel * 0.45, t);
-      harmGain.gain.exponentialRampToValueAtTime(0.001, t + decaySec * 0.8);
-
-      harmOsc.connect(harmGain);
-      harmGain.connect(compressor);
-      harmOsc.start(t);
-      harmOsc.stop(t + decaySec * 0.8);
-
-      // C. Sharp surface impact transient (dimpled urethane meeting hard plastic/aluminum)
-      const noise = ctx.createBufferSource();
-      noise.buffer = this.getNoiseBuffer(ctx);
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'bandpass';
-      filter.frequency.setValueAtTime(noiseFreq, t);
-      filter.Q.setValueAtTime(4.0, t);
-
-      const noiseGain = ctx.createGain();
-      noiseGain.gain.setValueAtTime(gainLevel * 0.6, t);
-      noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.018);
-
-      noise.connect(filter);
-      filter.connect(noiseGain);
-      noiseGain.connect(compressor);
-      noise.start(t);
-      noise.stop(t + 0.025);
-    };
-
-    // 1. Initial Lip Clip & Drop Entry (t = 0ms)
-    playBounce(0.0, 680, 0.4, 0.05, 3400);
-
-    // 2. Primary Hard Bottom Plate Impact — THE SATISFYING CLACK (t = 18ms)
-    playBounce(0.018, 480, 0.85, 0.11, 2600);
-
-    // Hollow cup low-end cavity thud (t = 18ms)
-    const subThud = ctx.createOscillator();
-    const subGain = ctx.createGain();
-    subThud.type = 'sine';
-    subThud.frequency.setValueAtTime(280, now + 0.018);
-    subThud.frequency.exponentialRampToValueAtTime(110, now + 0.12);
-
-    subGain.gain.setValueAtTime(0.65, now + 0.018);
-    subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
-
-    subThud.connect(subGain);
-    subGain.connect(compressor);
-    subThud.start(now + 0.018);
-    subThud.stop(now + 0.14);
-
-    // 3. First Rebound Clack inside Cup (t = 64ms)
-    playBounce(0.064, 430, 0.55, 0.08, 2200);
-
-    // 4. Second Bounce Rattle (t = 112ms)
-    playBounce(0.112, 380, 0.38, 0.065, 1900);
-
-    // 5. Third Light Settling Bounce (t = 158ms)
-    playBounce(0.158, 330, 0.22, 0.05, 1600);
-
-    // 6. Final Settling Flutter / Roll (t = 198ms)
-    playBounce(0.198, 280, 0.14, 0.04, 1400);
-
-    // 7. Flagstick Ferrule Chatter Vibration (t = 25ms - 220ms)
-    const pinChime = ctx.createOscillator();
-    const pinGain = ctx.createGain();
-    pinChime.type = 'sine';
-    pinChime.frequency.setValueAtTime(2150, now + 0.025);
-    pinChime.frequency.exponentialRampToValueAtTime(1920, now + 0.2);
-
-    pinGain.gain.setValueAtTime(0.18, now + 0.025);
-    pinGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
-
-    pinChime.connect(pinGain);
-    pinGain.connect(compressor);
-    pinChime.start(now + 0.025);
-    pinChime.stop(now + 0.23);
+  isEnabled() {
+    return this.enabled;
   }
 
-  /**
-   * Streak / Celebration sound for holed putts in survival drills
-   */
-  public playCelebrationChime(): void {
-    if (!this.soundEnabled) return;
-    const ctx = this.initCtx();
+  private noiseBuffer(ctx: AudioContext) {
+    if (!this.noise || this.noise.sampleRate !== ctx.sampleRate) {
+      const len = Math.floor(ctx.sampleRate * 0.4);
+      const b = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = b.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      this.noise = b;
+    }
+    return this.noise;
+  }
+
+  /** A single hard contact: noise impulse exciting tuned resonators. */
+  private impact(
+    t: number,
+    gain: number,
+    modes: [number, number, number][], // [freq Hz, Q, level]
+    burstMs = 1.6,
+    lowThump = 0
+  ) {
+    const ctx = this.ctx!;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(gain, t + 0.0004);
+    env.gain.exponentialRampToValueAtTime(0.0005, t + burstMs / 1000 + 0.002);
+    src.connect(env);
+    for (const [f, q, lvl] of modes) {
+      const bp = ctx.createBiquadFilter();
+      bp.type = 'bandpass';
+      bp.frequency.value = f;
+      bp.Q.value = q;
+      const g = ctx.createGain();
+      g.gain.value = lvl * Math.sqrt(q); // resonant energy roughly independent of Q
+      env.connect(bp);
+      bp.connect(g);
+      g.connect(this.master!);
+    }
+    // direct click
+    const hp = ctx.createBiquadFilter();
+    hp.type = 'highpass';
+    hp.frequency.value = 2500;
+    const hg = ctx.createGain();
+    hg.gain.value = 0.35;
+    env.connect(hp);
+    hp.connect(hg);
+    hg.connect(this.master!);
+    src.start(t);
+    src.stop(t + 0.06);
+
+    if (lowThump > 0) {
+      const o = ctx.createOscillator();
+      o.frequency.value = 140 + Math.random() * 20;
+      const og = ctx.createGain();
+      og.gain.setValueAtTime(lowThump, t);
+      og.gain.exponentialRampToValueAtTime(0.0005, t + 0.06);
+      o.connect(og);
+      og.connect(this.master!);
+      o.start(t);
+      o.stop(t + 0.07);
+    }
+  }
+
+  playPutterStrike() {
+    if (!this.enabled) return;
+    const ctx = this.init();
     if (!ctx) return;
+    const t = ctx.currentTime + 0.005;
+    // milled face on urethane cover: short bright click with a little head ring
+    this.impact(t, 0.55, [
+      [1900, 5, 0.25],
+      [3400, 9, 0.35],
+      [5600, 14, 0.18],
+    ], 1.2, 0.25);
+  }
 
-    const freqs = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+  playCupDrop() {
+    if (!this.enabled) return;
+    const ctx = this.init();
+    if (!ctx) return;
+    const t0 = ctx.currentTime + 0.01;
+    if (this.cupSample) {
+      const s = ctx.createBufferSource();
+      s.buffer = this.cupSample;
+      s.connect(this.master!);
+      s.start(t0);
+      return;
+    }
+    const j = () => 1 + (Math.random() - 0.5) * 0.08; // ±4% per drop
+    const cupModes: [number, number, number][] = [
+      [430 * j(), 7, 0.45],
+      [980 * j(), 11, 0.9],
+      [1680 * j(), 13, 0.7],
+      [2750 * j(), 15, 0.45],
+      [4300 * j(), 12, 0.22],
+    ];
+    // rim tick as the ball tips over the edge
+    this.impact(t0, 0.12, [[3100, 8, 0.4], [5200, 10, 0.2]], 0.8);
+    // fall ~85 mm, then rebound with decreasing intervals
+    const g = 9.81;
+    const e = 0.42 + Math.random() * 0.08;
+    let v = Math.sqrt(2 * g * 0.085);
+    let t = t0 + Math.sqrt((2 * 0.085) / g);
+    for (let i = 0; i < 6 && v > 0.04; i++) {
+      const level = Math.min(1, Math.pow(v / 1.3, 1.1));
+      this.impact(t, 0.9 * level, cupModes, 1.8, i === 0 ? 0.55 : 0.15 * level);
+      v *= e;
+      t += (2 * v) / g;
+    }
+    // short settle/rattle as it comes to rest
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer(ctx);
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 1100;
+    bp.Q.value = 2.5;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.0001, t);
+    ng.gain.linearRampToValueAtTime(0.05, t + 0.02);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+    src.connect(bp);
+    bp.connect(ng);
+    ng.connect(this.master!);
+    src.start(t);
+    src.stop(t + 0.2);
+  }
+
+  playLipOut() {
+    if (!this.enabled) return;
+    const ctx = this.init();
+    if (!ctx) return;
+    const t = ctx.currentTime + 0.005;
+    const modes: [number, number, number][] = [
+      [980, 10, 0.5],
+      [1700, 12, 0.4],
+      [2800, 14, 0.25],
+    ];
+    this.impact(t, 0.3, modes, 1.4);
+    this.impact(t + 0.045, 0.14, modes, 1.0);
+  }
+
+  playChime() {
+    if (!this.enabled) return;
+    const ctx = this.init();
+    if (!ctx) return;
     const now = ctx.currentTime;
-
-    freqs.forEach((freq, idx) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const noteTime = now + idx * 0.07;
-
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, noteTime);
-
-      gain.gain.setValueAtTime(0.25, noteTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, noteTime + 0.4);
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.start(noteTime);
-      osc.stop(noteTime + 0.42);
+    [659.25, 987.77].forEach((f, i) => {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      const gn = ctx.createGain();
+      const t = now + i * 0.09;
+      gn.gain.setValueAtTime(0.0001, t);
+      gn.gain.linearRampToValueAtTime(0.12, t + 0.01);
+      gn.gain.exponentialRampToValueAtTime(0.0001, t + 0.6);
+      o.connect(gn);
+      gn.connect(this.master!);
+      o.start(t);
+      o.stop(t + 0.65);
     });
   }
 }

@@ -1,81 +1,45 @@
 /**
- * SquarePutt Types & Data Models
- * High-fidelity putting analysis and gamified practice for Square Golf Launch Monitor.
+ * SquarePutt types & data models.
  */
 
-// Open Connect API standard telemetry packet formats
+// Open Connect (GSPro Connect v1) shot message
 export interface RawOpenConnectPacket {
+  DeviceID?: string;
+  Units?: string;
+  APIversion?: string;
   BallData?: {
-    Speed?: number;        // mph or m/s depending on connector
-    VLA?: number;          // Vertical Launch Angle (deg)
-    HLA?: number;          // Horizontal Launch Angle (deg, - left, + right)
-    TotalSpin?: number;    // RPM
-    SpinAxis?: number;     // deg
+    Speed?: number; // mph
+    VLA?: number; // vertical launch (deg)
+    HLA?: number; // horizontal launch (deg, + right)
+    TotalSpin?: number;
+    BackSpin?: number;
+    SideSpin?: number;
+    SpinAxis?: number;
     CarryDistance?: number;
   };
   ClubData?: {
-    Speed?: number;        // mph
-    Path?: number;         // deg (- in-to-out or out-to-in depending on standard)
-    FaceToPath?: number;   // deg
-    FaceAngle?: number;    // deg (- closed, + open)
-    AngleOfAttack?: number;// deg (- downward, + upward)
-    DynamicLoft?: number;  // deg
+    Speed?: number;
+    Path?: number; // deg (+ in-to-out)
+    FaceToPath?: number;
+    FaceToTarget?: number; // GSPro name for face angle
+    FaceAngle?: number; // alias used by some connectors
+    AngleOfAttack?: number;
+    DynamicLoft?: number;
+    Loft?: number; // GSPro name for dynamic loft
     Lie?: number;
   };
+  ShotDataOptions?: {
+    ContainsBallData?: boolean;
+    ContainsClubData?: boolean;
+    LaunchMonitorIsReady?: boolean;
+    LaunchMonitorBallDetected?: boolean;
+    IsHeartBeat?: boolean;
+  };
   ShotNumber?: number;
-  Confidence?: number;     // 0-100% confidence rating if supplied
-  DeviceStatus?: string;
+  Confidence?: number;
   Timestamp?: number;
 }
 
-// Sanitized and normalized telemetry shot record
-export interface PuttingShotData {
-  id: string;
-  timestamp: number;
-  shotNumber: number;
-
-  // Ball Telemetry
-  ballSpeedMph: number;     // mph
-  ballSpeedMps: number;     // m/s
-  vla: number;              // Vertical Launch Angle (deg)
-  hla: number;              // Horizontal Launch Angle (deg, - left, + right)
-  totalSpinRpm?: number;
-
-  // Club Telemetry
-  clubSpeedMph?: number;    // mph
-  angleOfAttackDeg: number; // deg (+ upward, - downward)
-  putterPathDeg: number;    // deg (+ in-to-out, - out-to-in)
-  faceAngleDeg: number;     // deg (+ open, - closed)
-  faceToPathDeg: number;    // faceAngle - putterPath
-  dynamicLoftDeg: number;   // deg
-
-  // Physics Simulation Results
-  stimpSetting: number;     // Stimp 9.0 to 12.0
-  slopeDifficulty: 'flat' | 'mild' | 'medium' | 'hard';
-  targetDistanceFt: number; // distance to hole in feet
-  rollDistanceFt: number;   // total distance rolled in feet
-  lateralErrorInches: number;// lateral deviation at rest (- left, + right in inches)
-  distanceErrorFt: number;  // (rollDistanceFt - targetDistanceFt)
-  isHoled: boolean;         // entered cup below threshold speed
-  timeToZeroSkidMs: number; // calculated skid duration
-  skidDistanceInches: number;// distance traveled before pure rolling
-  trueRollDistanceFt: number;// pure roll distance
-  skidPercentage: number;   // skid / total distance
-
-  // Quintic Consistency Grades
-  grades: {
-    faceAngleGrade: QuinticGrade;
-    pathGrade: QuinticGrade;
-    speedConsistencyGrade: QuinticGrade;
-    launchGrade: QuinticGrade;
-    overallGrade: QuinticGrade;
-  };
-
-  // Trajectory points for 3D animation [x, y, z] in meters
-  trajectoryPoints?: [number, number, number][];
-}
-
-// Quintic-inspired color-coding tiers
 export type QuinticGrade = 'eagle' | 'birdie' | 'par' | 'bogey';
 
 export interface QuinticTierInfo {
@@ -87,63 +51,88 @@ export interface QuinticTierInfo {
   description: string;
 }
 
-// Green Environment Configuration
 export type SlopeDifficulty = 'flat' | 'mild' | 'medium' | 'hard';
-
-export interface GreenEnvironmentConfig {
-  stimp: number;            // 9.0 - 12.0
-  slopeDifficulty: SlopeDifficulty;
-  gridVisible: boolean;
-  heatmapVisible: boolean;
-  fallLinesVisible: boolean;
-  cameraMode: 'behind' | 'overhead' | 'follow' | 'orbit';
-  cameraAngle: number;      // rotation angle in rad
-}
-
-// Gamified Drill Modes
+export type CameraMode = 'behind' | 'overhead' | 'follow' | 'orbit';
 export type AppMode = 'analysis' | 'pressure-circle' | 'speed-control' | 'scramble-gauntlet' | 'analytics';
+export type ReadAssist = 'off' | 'read' | 'line';
 
-// Drill A: Short Putts ("The Pressure Circle" - Survival Mode)
-export interface PressureCircleState {
-  currentDistanceFt: 3 | 5 | 8;
-  targetHoleRadiusMultiplier: number; // shrinks as streak increases (1.0 down to 0.5)
-  streak: number;
-  bestStreak: number;
-  totalAttempts: number;
-  totalMakes: number;
-  faceAngles: number[];
-  faceAngleStdDev: number;
-  status: 'active' | 'game-over' | 'completed';
+/** Where the ball and hole are, on which green. The hole is always at the origin. */
+export interface PuttLayout {
+  seed: number;
+  difficulty: SlopeDifficulty;
+  distanceFt: number;
+  /** Direction from hole to ball; 0 = ball straight "below" the hole (putting toward +z). */
+  angleRad: number;
+  holeRadiusMultiplier: number;
+  /** Exact ball position override (m), e.g. a follow-up putt in The Scramble. */
+  ball?: { x: number; z: number };
+  /** Ball spot the green outline is drawn around (defaults to the ball). */
+  anchor?: { x: number; z: number };
+  /** Draw a round green of this radius around the hole instead (drills with many ball spots). */
+  greenRadiusM?: number;
 }
 
-// Drill B: Lag Putts ("Speed Control Zone" - Bullseye)
-export interface SpeedControlState {
-  currentDistanceFt: 20 | 30 | 50;
-  safeZoneDepthFt: number;  // 3ft past the hole
-  score: number;
-  attempts: number;
-  pastHoleSafeCount: number;
-  shortCount: number;
-  longCount: number;
-  ballSpeeds: number[];
-  ballSpeedStdDev: number;
-  distanceDispersionStdDevFt: number;
+export interface PuttingShotData {
+  id: string;
+  timestamp: number;
+  shotNumber: number;
+  source: 'live' | 'sim';
+  mode: AppMode;
+
+  // Ball
+  ballSpeedMph: number;
+  ballSpeedMps: number;
+  vla: number;
+  hla: number;
+  backspinRpm?: number;
+
+  // Club
+  clubSpeedMph?: number;
+  angleOfAttackDeg: number;
+  putterPathDeg: number;
+  faceAngleDeg: number;
+  faceToPathDeg: number;
+  dynamicLoftDeg: number;
+
+  // Setup
+  stimpSetting: number;
+  slopeDifficulty: SlopeDifficulty;
+  greenSeed: number;
+  targetDistanceFt: number;
+  ballStart: { x: number; z: number };
+
+  // Outcome
+  rest: { x: number; z: number };
+  rollDistanceFt: number;
+  lateralErrorInches: number; // + right of the start line to the hole
+  distanceErrorFt: number; // + past the hole
+  leaveFt: number;
+  isHoled: boolean;
+  lipOut: boolean;
+  timeToZeroSkidMs: number;
+  skidDistanceInches: number;
+  trueRollDistanceFt: number;
+  skidPercentage: number;
+
+  // Versus the ideal stroke for this putt
+  idealSpeedMph?: number;
+  idealHlaDeg?: number;
+  speedErrorPct?: number; // + = too firm
+  startLineErrorDeg?: number; // + = right of ideal line
+
+  grades: {
+    faceAngleGrade: QuinticGrade;
+    pathGrade: QuinticGrade;
+    speedConsistencyGrade: QuinticGrade;
+    launchGrade: QuinticGrade;
+    overallGrade: QuinticGrade;
+  };
+
+  /** [x, y, z] every trajectoryDt seconds (not persisted to history). */
+  trajectoryPoints?: [number, number, number][];
+  trajectoryDt?: number;
 }
 
-// Drill C: Random Putts ("The Scramble" - The Gauntlet)
-export interface ScrambleGauntletState {
-  holeNumber: number;
-  totalHoles: number;
-  currentDistanceFt: number;  // 6ft to 40ft randomized
-  currentSlopeDifficulty: SlopeDifficulty;
-  currentGimmeRadiusFt: number; // scales dynamically with distance
-  strokesGainedTotal: number;
-  totalCepInches: number;     // Circular Error Probable
-  puttsInsideGimme: number;
-  puttsHoled: number;
-}
-
-// User Profile & Bag Mapping
 export interface UserProfile {
   id: string;
   name: string;
@@ -159,15 +148,17 @@ export interface DistanceBagBucket {
   attempts: number;
   makes: number;
   makeRatePct: number;
+  tourMakeRatePct: number;
   avgMissDistanceInches: number;
   avgFaceAngleDeg: number;
   avgSpeedMph: number;
 }
 
-// Open Connect WebSocket Connection State
 export interface ConnectionState {
-  connected: boolean;
+  connected: boolean; // connected to the SquarePutt bridge
   connecting: boolean;
+  launchMonitorConnected: boolean; // a launch monitor connector is attached to the bridge
+  launchMonitorName: string | null;
   url: string;
   port: number;
   lastMessageTime: number | null;

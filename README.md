@@ -95,6 +95,22 @@ Built with **Next.js (App Router)**, **TypeScript**, **Three.js**, and **Vanilla
 
 ---
 
+## Quick start (v2)
+
+```bash
+npm install          # adds Tailwind CSS (new dependency)
+npm run dev          # app at http://localhost:3000
+npm run bridge       # in a second terminal, to receive putts from your Square
+```
+
+**Connecting the Square:** GSPro Open Connect connectors dial *into* a server on port 921, which a web page cannot be. `npm run bridge` plays GSPro's role on 127.0.0.1:921 and relays shots to the app on ws://127.0.0.1:9210. Close GSPro first, then point your Square/GSPro connector at GSPro as usual. The bridge also tells the monitor a putter is selected.
+
+**Physics:** skid-then-roll model (Penner 2002) with rolling resistance from the Stimpmeter (1.83 m/s release), full-gravity skid / 5/7-gravity roll on slopes, and a capture model where cup entry speed limits depend on how centred the ball is (lip-outs happen). Validate with `npm run check:physics`.
+
+**Greens:** deterministic seeded surfaces (tilts, crowns, bowls, double breaks, tiers), scaled so the steepest slope matches the difficulty (Mild ≤1°, Medium ≤2°, Hard ≤3°), with the hole location capped to a fair slope for the stimp.
+
+---
+
 ## 🛠️ Tech Stack
 
 * **Framework:** Next.js 16+ (App Router, Turbopack)

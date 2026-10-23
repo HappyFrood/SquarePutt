@@ -1,377 +1,312 @@
 /**
- * Open Connect API WebSocket Client & Shot Simulator Service
- * Handles live telemetry from community connectors (Square Golf, GSPro, OpenGolfSim)
- * with auto-reconnection, data sanitization, and virtual simulator fallback.
+ * Launch monitor connection + shot processing.
+ *
+ * Browsers cannot accept the TCP connection a GSPro Open Connect connector makes, so the
+ * SquarePutt bridge (bridge/squareputt-bridge.mjs) plays the part of GSPro on port 921 and
+ * relays shots to this page over a local WebSocket (default ws://127.0.0.1:9210).
  */
 
-import { RawOpenConnectPacket, PuttingShotData, ConnectionState, SlopeDifficulty } from './types';
-import { telemetrySanitizer } from './dataSanitizer';
-import { simulatePutt } from './physicsEngine';
-import {
-  gradeFaceAngle,
-  gradePutterPath,
-  analyzeDynamicLoft,
-} from './calculations';
+import { RawOpenConnectPacket, PuttingShotData, ConnectionState, AppMode, PuttLayout } from './types';
+import { NormalizedStroke, telemetrySanitizer } from './dataSanitizer';
+import { IdealStroke, PuttSetup, simulatePutt, MPH_TO_MPS } from './physicsEngine';
+import { gradeFaceAngle, gradePutterPath, analyzeDynamicLoft, gradeSpeedError } from './calculations';
+import { QuinticGrade } from './types';
 
 export type ShotListener = (shot: PuttingShotData) => void;
 export type ConnectionListener = (state: ConnectionState) => void;
-export type FilterListener = (reason: string, packet: RawOpenConnectPacket) => void;
+export type FilterListener = (reason: string) => void;
+
+export const DEFAULT_BRIDGE_PORT = 9210;
+const PORT_KEY = 'squareputt_bridge_port_v2';
+
+export interface ShotContext {
+  setup: PuttSetup;
+  layout: PuttLayout;
+  ideal: IdealStroke | null;
+  mode: AppMode;
+}
 
 class OpenConnectService {
   private ws: WebSocket | null = null;
-  private url = 'ws://127.0.0.1:921';
-  private reconnectTimer: NodeJS.Timeout | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 10;
-  private reconnectIntervalMs = 3000;
   private shouldReconnect = true;
+  private context: ShotContext | null = null;
+  /** When false, incoming shots are dropped (e.g. while a putt is still rolling). */
+  private accepting = true;
 
-  private shotListeners: Set<ShotListener> = new Set();
-  private connectionListeners: Set<ConnectionListener> = new Set();
-  private filterListeners: Set<FilterListener> = new Set();
+  private shotListeners = new Set<ShotListener>();
+  private connectionListeners = new Set<ConnectionListener>();
+  private filterListeners = new Set<FilterListener>();
 
   private state: ConnectionState = {
     connected: false,
     connecting: false,
-    url: 'ws://127.0.0.1:921',
-    port: 921,
+    launchMonitorConnected: false,
+    launchMonitorName: null,
+    url: `ws://127.0.0.1:${DEFAULT_BRIDGE_PORT}`,
+    port: DEFAULT_BRIDGE_PORT,
     lastMessageTime: null,
     errorMessage: null,
     packetsReceived: 0,
     packetsFiltered: 0,
   };
 
-  private currentStimp = 10.5;
-  private currentTargetDistanceFt = 10.0;
-  private currentSlopeDifficulty: SlopeDifficulty = 'flat';
-  private currentTerrainSeed = 42;
-  private currentHoleRadiusMultiplier = 1.0;
-
   constructor() {
-    // Only attempt browser WebSocket connection on client side
-    if (typeof window !== 'undefined') {
-      const savedPort = localStorage.getItem('squareputt_oc_port');
-      if (savedPort) {
-        const port = parseInt(savedPort, 10);
-        if (!isNaN(port)) {
-          this.state.port = port;
-          this.url = `ws://127.0.0.1:${port}`;
-          this.state.url = this.url;
-        }
-      }
+    if (typeof window === 'undefined') return;
+    try {
+      const saved = parseInt(localStorage.getItem(PORT_KEY) ?? '', 10);
+      if (saved > 0 && saved < 65536) this.applyPort(saved);
+    } catch {
+      /* storage unavailable */
     }
   }
 
-  public setEnvironmentContext({
-    stimp,
-    targetDistanceFt,
-    slopeDifficulty,
-    terrainSeed = 42,
-    holeRadiusMultiplier = 1.0,
-  }: {
-    stimp: number;
-    targetDistanceFt: number;
-    slopeDifficulty: SlopeDifficulty;
-    terrainSeed?: number;
-    holeRadiusMultiplier?: number;
-  }) {
-    this.currentStimp = stimp;
-    this.currentTargetDistanceFt = targetDistanceFt;
-    this.currentSlopeDifficulty = slopeDifficulty;
-    this.currentTerrainSeed = terrainSeed;
-    this.currentHoleRadiusMultiplier = holeRadiusMultiplier;
+  setContext(ctx: ShotContext) {
+    this.context = ctx;
   }
 
-  public getState(): ConnectionState {
+  setAccepting(accepting: boolean) {
+    this.accepting = accepting;
+  }
+
+  getState(): ConnectionState {
     return { ...this.state };
   }
 
-  public setPort(port: number): void {
+  private applyPort(port: number) {
     this.state.port = port;
-    this.url = `ws://127.0.0.1:${port}`;
-    this.state.url = this.url;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('squareputt_oc_port', port.toString());
-    }
-    if (this.state.connected || this.state.connecting) {
-      this.disconnect();
-      this.connect();
-    }
+    this.state.url = `ws://127.0.0.1:${port}`;
   }
 
-  public connect(): void {
-    if (typeof window === 'undefined') return;
-    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
-      return;
-    }
-
-    this.shouldReconnect = true;
-    this.updateState({ connecting: true, errorMessage: null });
-
+  setPort(port: number) {
+    this.applyPort(port);
     try {
-      this.ws = new WebSocket(this.url);
+      localStorage.setItem(PORT_KEY, String(port));
+    } catch {
+      /* ignore */
+    }
+    this.disconnect();
+    this.connect();
+  }
 
-      this.ws.onopen = () => {
+  connect() {
+    if (typeof window === 'undefined') return;
+    if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) return;
+    this.shouldReconnect = true;
+    this.update({ connecting: true, errorMessage: null });
+    try {
+      const ws = new WebSocket(this.state.url);
+      this.ws = ws;
+      ws.onopen = () => {
         this.reconnectAttempts = 0;
-        this.updateState({
-          connected: true,
-          connecting: false,
-          errorMessage: null,
-        });
+        this.update({ connected: true, connecting: false, errorMessage: null });
       };
-
-      this.ws.onmessage = (event) => {
-        this.handleRawMessage(event.data);
+      ws.onmessage = (ev) => this.handleMessage(typeof ev.data === 'string' ? ev.data : '');
+      ws.onerror = () => {
+        this.update({ errorMessage: `SquarePutt bridge not found at ${this.state.url}. Start it with "npm run bridge".` });
       };
-
-      this.ws.onerror = () => {
-        this.updateState({
-          errorMessage: `Cannot reach Open Connect server at ${this.url}. Check connector software.`,
-        });
+      ws.onclose = () => {
+        this.update({ connected: false, connecting: false, launchMonitorConnected: false });
+        if (this.shouldReconnect) this.scheduleReconnect();
       };
-
-      this.ws.onclose = () => {
-        this.updateState({
-          connected: false,
-          connecting: false,
-        });
-        if (this.shouldReconnect) {
-          this.scheduleReconnect();
-        }
-      };
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      this.updateState({
-        connected: false,
-        connecting: false,
-        errorMessage: `Connection failed: ${msg}`,
-      });
-      if (this.shouldReconnect) {
-        this.scheduleReconnect();
-      }
+    } catch (err) {
+      this.update({ connected: false, connecting: false, errorMessage: String(err) });
+      if (this.shouldReconnect) this.scheduleReconnect();
     }
   }
 
-  public disconnect(): void {
+  disconnect() {
     this.shouldReconnect = false;
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
-    }
-    this.updateState({
-      connected: false,
-      connecting: false,
-    });
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    this.ws?.close();
+    this.ws = null;
+    this.update({ connected: false, connecting: false, launchMonitorConnected: false });
   }
 
-  private scheduleReconnect(): void {
+  private scheduleReconnect() {
     if (this.reconnectTimer) return;
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      this.updateState({
-        errorMessage: `Connection suspended after ${this.maxReconnectAttempts} attempts. Use manual reconnect or the built-in simulator.`,
-      });
-      return;
-    }
-
+    // Back off gently but never give up: the bridge may be started later.
+    const delay = Math.min(15000, 2000 + this.reconnectAttempts * 1000);
     this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
-    }, this.reconnectIntervalMs);
+    }, delay);
   }
 
-  private handleRawMessage(rawData: string): void {
+  private handleMessage(data: string) {
     this.state.packetsReceived++;
     this.state.lastMessageTime = Date.now();
-    this.notifyConnectionState();
-
+    let msg: unknown;
     try {
-      const parsed: RawOpenConnectPacket = JSON.parse(rawData);
-      this.processPacket(parsed);
-    } catch (err) {
-      console.warn('[OpenConnect] Malformed JSON packet received:', err);
+      msg = JSON.parse(data);
+    } catch {
+      this.notify();
+      return;
     }
+    const m = msg as { type?: string; packet?: RawOpenConnectPacket; launchMonitorConnected?: boolean; device?: string };
+    if (m.type === 'status') {
+      this.update({ launchMonitorConnected: !!m.launchMonitorConnected, launchMonitorName: m.device ?? null });
+      return;
+    }
+    const packet = (m.type === 'shot' ? m.packet : msg) as RawOpenConnectPacket;
+    this.notify();
+    this.processPacket(packet, 'live');
   }
 
-  /**
-   * Processes a validated packet and generates a full PuttingShotData record with physics.
-   */
-  public processPacket(packet: RawOpenConnectPacket): PuttingShotData | null {
-    // 1. Sanitize incoming telemetry
-    const sanitization = telemetrySanitizer.sanitize(packet);
-    if (!sanitization.isValid || !sanitization.sanitizedPacket) {
+  processPacket(packet: RawOpenConnectPacket, source: 'live' | 'sim'): PuttingShotData | null {
+    const res = telemetrySanitizer.sanitize(packet);
+    if (res.kind === 'ignore') return null;
+    if (res.kind === 'reject') {
       this.state.packetsFiltered++;
-      this.notifyConnectionState();
-      this.filterListeners.forEach((listener) =>
-        listener(sanitization.reason || 'Packet filtered', packet)
-      );
+      this.notify();
+      this.filterListeners.forEach((l) => l(res.reason));
       return null;
     }
+    if (!this.accepting) {
+      this.filterListeners.forEach((l) => l('Putt ignored — wait for the next ball to be set'));
+      return null;
+    }
+    return this.processStroke(res.stroke, source);
+  }
 
-    const clean = sanitization.sanitizedPacket;
-    const ballSpeedMph = clean.BallData?.Speed ?? 5.0;
-    const hlaDeg = clean.BallData?.HLA ?? 0.0;
-    const vlaDeg = clean.BallData?.VLA ?? 1.5;
-    const faceAngleDeg = clean.ClubData?.FaceAngle ?? hlaDeg * 0.85;
-    const putterPathDeg = clean.ClubData?.Path ?? 0.0;
-    const aoaDeg = clean.ClubData?.AngleOfAttack ?? 1.2;
-    const dynamicLoftDeg = clean.ClubData?.DynamicLoft ?? 2.4;
-
-    // 2. Run numerical putting physics simulation
-    const sim = simulatePutt({
-      ballSpeedMph,
-      hlaDeg,
-      vlaDeg,
-      stimp: this.currentStimp,
-      targetDistanceFt: this.currentTargetDistanceFt,
-      slopeDifficulty: this.currentSlopeDifficulty,
-      terrainSeed: this.currentTerrainSeed,
-      holeRadiusMultiplier: this.currentHoleRadiusMultiplier,
+  private processStroke(s: NormalizedStroke, source: 'live' | 'sim'): PuttingShotData | null {
+    const ctx = this.context;
+    if (!ctx) return null;
+    const sim = simulatePutt(ctx.setup, {
+      ballSpeedMph: s.ballSpeedMph,
+      hlaDeg: s.hlaDeg,
+      backspinRpm: s.backspinRpm,
     });
 
-    // 3. Compute Biomechanical & Quintic Grades
-    const faceGrade = gradeFaceAngle(faceAngleDeg);
-    const pathGrade = gradePutterPath(putterPathDeg);
-    const loftAnalysis = analyzeDynamicLoft(dynamicLoftDeg, aoaDeg, vlaDeg);
+    const effSpeed = s.ballSpeedMph * (ctx.setup.speedCalibration ?? 1);
+    const speedErrorPct = ctx.ideal ? ((effSpeed - ctx.ideal.ballSpeedMph) / ctx.ideal.ballSpeedMph) * 100 : undefined;
+    const startLineErrorDeg = ctx.ideal ? s.hlaDeg - ctx.ideal.hlaDeg : undefined;
 
-    // Speed consistency relative to target distance
-    const expectedSpeedMph = Math.sqrt((this.currentTargetDistanceFt * 1.95) / (this.currentStimp * 0.12));
-    const speedRatio = Math.abs(ballSpeedMph - expectedSpeedMph) / Math.max(1, expectedSpeedMph);
-    const speedGrade = speedRatio < 0.06 ? 'eagle' : speedRatio < 0.12 ? 'birdie' : speedRatio < 0.20 ? 'par' : 'bogey';
+    // On a breaking putt the right start line isn't at the hole, so grade against the ideal line.
+    const faceGrade = gradeFaceAngle(startLineErrorDeg ?? s.faceAngleDeg);
+    const pathGrade = gradePutterPath(s.pathDeg);
+    const speedGrade: QuinticGrade = speedErrorPct !== undefined ? gradeSpeedError(speedErrorPct) : 'par';
+    const loft = analyzeDynamicLoft(s.dynamicLoftDeg, s.aoaDeg, s.vlaDeg);
+    const rank: Record<QuinticGrade, number> = { eagle: 0, birdie: 1, par: 2, bogey: 3 };
+    const worst = Math.max(rank[faceGrade], rank[speedGrade]);
+    const overall = sim.isHoled && worst > 1 ? 'birdie' : (['eagle', 'birdie', 'par', 'bogey'] as QuinticGrade[])[worst];
 
-    const overallGrade =
-      faceGrade === 'eagle' && speedGrade === 'eagle'
-        ? 'eagle'
-        : faceGrade === 'bogey' || speedGrade === 'bogey'
-        ? 'bogey'
-        : faceGrade === 'birdie' || speedGrade === 'birdie'
-        ? 'birdie'
-        : 'par';
+    const rollFt = sim.pathLengthFt;
+    const skidFt = sim.skidDistanceIn / 12;
+    const ball = ctx.setup.ball;
 
-    const shotData: PuttingShotData = {
-      id: `shot_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    const shot: PuttingShotData = {
+      id: `shot_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
       timestamp: Date.now(),
-      shotNumber: clean.ShotNumber ?? Date.now(),
-      ballSpeedMph,
-      ballSpeedMps: Number((ballSpeedMph * 0.44704).toFixed(2)),
-      vla: vlaDeg,
-      hla: hlaDeg,
-      totalSpinRpm: clean.BallData?.TotalSpin ?? 0,
-      clubSpeedMph: clean.ClubData?.Speed ?? Number((ballSpeedMph * 0.65).toFixed(1)),
-      angleOfAttackDeg: aoaDeg,
-      putterPathDeg,
-      faceAngleDeg,
-      faceToPathDeg: Number((faceAngleDeg - putterPathDeg).toFixed(2)),
-      dynamicLoftDeg,
-      stimpSetting: this.currentStimp,
-      slopeDifficulty: this.currentSlopeDifficulty,
-      targetDistanceFt: this.currentTargetDistanceFt,
-      rollDistanceFt: sim.totalDistanceFt,
-      lateralErrorInches: sim.lateralDeviationInches,
-      distanceErrorFt: sim.distanceErrorFt,
+      shotNumber: s.shotNumber,
+      source,
+      mode: ctx.mode,
+      ballSpeedMph: s.ballSpeedMph,
+      ballSpeedMps: Number((s.ballSpeedMph * MPH_TO_MPS).toFixed(2)),
+      vla: s.vlaDeg,
+      hla: s.hlaDeg,
+      backspinRpm: s.backspinRpm,
+      clubSpeedMph: s.clubSpeedMph,
+      angleOfAttackDeg: s.aoaDeg,
+      putterPathDeg: s.pathDeg,
+      faceAngleDeg: s.faceAngleDeg,
+      faceToPathDeg: Number((s.faceAngleDeg - s.pathDeg).toFixed(2)),
+      dynamicLoftDeg: s.dynamicLoftDeg,
+      stimpSetting: ctx.setup.stimp,
+      slopeDifficulty: ctx.layout.difficulty,
+      greenSeed: ctx.layout.seed,
+      targetDistanceFt: Number((Math.hypot(ball.x, ball.z) * 3.28084).toFixed(1)),
+      ballStart: { x: ball.x, z: ball.z },
+      rest: sim.rest,
+      rollDistanceFt: Number(rollFt.toFixed(2)),
+      lateralErrorInches: Number(sim.lateralErrorIn.toFixed(1)),
+      distanceErrorFt: Number(sim.distanceErrorFt.toFixed(2)),
+      leaveFt: Number(sim.leaveFt.toFixed(2)),
       isHoled: sim.isHoled,
-      timeToZeroSkidMs: sim.timeToZeroSkidMs,
-      skidDistanceInches: sim.skidDistanceInches,
-      trueRollDistanceFt: sim.trueRollDistanceFt,
-      skidPercentage: Number(
-        ((sim.skidDistanceInches / (sim.totalDistanceFt * 12 || 1)) * 100).toFixed(1)
-      ),
+      lipOut: sim.lipOut,
+      timeToZeroSkidMs: sim.skidTimeMs,
+      skidDistanceInches: Number(sim.skidDistanceIn.toFixed(1)),
+      trueRollDistanceFt: Number(Math.max(0, rollFt - skidFt).toFixed(2)),
+      skidPercentage: Number(((skidFt / Math.max(0.01, rollFt)) * 100).toFixed(1)),
+      idealSpeedMph: ctx.ideal?.ballSpeedMph,
+      idealHlaDeg: ctx.ideal?.hlaDeg,
+      speedErrorPct: speedErrorPct !== undefined ? Number(speedErrorPct.toFixed(1)) : undefined,
+      startLineErrorDeg: startLineErrorDeg !== undefined ? Number(startLineErrorDeg.toFixed(2)) : undefined,
       grades: {
         faceAngleGrade: faceGrade,
         pathGrade,
         speedConsistencyGrade: speedGrade,
-        launchGrade: loftAnalysis.grade,
-        overallGrade,
+        launchGrade: loft.grade,
+        overallGrade: overall,
       },
-      trajectoryPoints: sim.trajectory.map((p) => [p.x, p.y, p.z]),
+      trajectoryPoints: sim.samples,
+      trajectoryDt: sim.sampleDt,
     };
-
-    // Notify listeners
-    this.shotListeners.forEach((listener) => listener(shotData));
-    return shotData;
+    this.shotListeners.forEach((l) => l(shot));
+    return shot;
   }
 
-  /**
-   * Virtual Simulator: Trigger a synthetic shot for testing & practice
-   */
-  public triggerSimulatedShot({
-    ballSpeedMph,
-    hlaDeg = 0.0,
-    faceAngleDeg,
-    pathDeg = 0.0,
-    angleOfAttackDeg = 1.2,
-    dynamicLoftDeg = 2.4,
-    vlaDeg = 1.5,
-  }: {
-    ballSpeedMph?: number;
-    hlaDeg?: number;
+  /** Virtual stroke for practicing without hardware. */
+  triggerSimulatedShot(p: {
+    ballSpeedMph: number;
+    hlaDeg: number;
     faceAngleDeg?: number;
     pathDeg?: number;
     angleOfAttackDeg?: number;
     dynamicLoftDeg?: number;
-    vlaDeg?: number;
-  }): PuttingShotData | null {
-    // If ball speed not specified, calculate optimal speed for current target distance & stimp
-    const targetFt = this.currentTargetDistanceFt;
-    const stimp = this.currentStimp;
-
-    // Approximate speed in mph required on flat green: v ~ sqrt(distFt * (14.0 / stimp) * 2.8)
-    const idealSpeedMph = Math.sqrt(targetFt * (11.0 / stimp) * 2.4);
-    const speed = ballSpeedMph ?? Number(idealSpeedMph.toFixed(1));
-    const face = faceAngleDeg ?? Number((hlaDeg * 0.85).toFixed(2));
-
-    const syntheticPacket: RawOpenConnectPacket = {
-      BallData: {
-        Speed: speed,
-        HLA: hlaDeg,
-        VLA: vlaDeg,
-        TotalSpin: 80,
-        SpinAxis: 0,
+  }) {
+    const face = p.faceAngleDeg ?? p.hlaDeg / 0.82;
+    return this.processPacket(
+      {
+        BallData: { Speed: p.ballSpeedMph, HLA: p.hlaDeg, VLA: 1.2 + 0.3 * (p.dynamicLoftDeg ?? 2.5) - 0.5 },
+        ClubData: {
+          Path: p.pathDeg ?? 0,
+          FaceAngle: face,
+          AngleOfAttack: p.angleOfAttackDeg ?? 1.5,
+          DynamicLoft: p.dynamicLoftDeg ?? 2.5,
+          Speed: p.ballSpeedMph * 0.62,
+        },
+        ShotDataOptions: { ContainsBallData: true, ContainsClubData: true },
+        ShotNumber: Math.floor(Math.random() * 1e6),
+        Confidence: 99,
       },
-      ClubData: {
-        Speed: Number((speed * 0.65).toFixed(1)),
-        Path: pathDeg,
-        FaceAngle: face,
-        FaceToPath: Number((face - pathDeg).toFixed(2)),
-        AngleOfAttack: angleOfAttackDeg,
-        DynamicLoft: dynamicLoftDeg,
-      },
-      Confidence: 98,
-      ShotNumber: Math.floor(Math.random() * 10000),
-      Timestamp: Date.now(),
+      'sim'
+    );
+  }
+
+  subscribeShot(l: ShotListener) {
+    this.shotListeners.add(l);
+    return () => {
+      this.shotListeners.delete(l);
     };
-
-    return this.processPacket(syntheticPacket);
   }
 
-  public subscribeShot(listener: ShotListener): () => void {
-    this.shotListeners.add(listener);
-    return () => this.shotListeners.delete(listener);
+  subscribeConnection(l: ConnectionListener) {
+    this.connectionListeners.add(l);
+    l(this.getState());
+    return () => {
+      this.connectionListeners.delete(l);
+    };
   }
 
-  public subscribeConnection(listener: ConnectionListener): () => void {
-    this.connectionListeners.add(listener);
-    listener(this.getState());
-    return () => this.connectionListeners.delete(listener);
+  subscribeFilter(l: FilterListener) {
+    this.filterListeners.add(l);
+    return () => {
+      this.filterListeners.delete(l);
+    };
   }
 
-  public subscribeFilter(listener: FilterListener): () => void {
-    this.filterListeners.add(listener);
-    return () => this.filterListeners.delete(listener);
-  }
-
-  private updateState(partial: Partial<ConnectionState>): void {
+  private update(partial: Partial<ConnectionState>) {
     this.state = { ...this.state, ...partial };
-    this.notifyConnectionState();
+    this.notify();
   }
 
-  private notifyConnectionState(): void {
+  private notify() {
     const s = this.getState();
-    this.connectionListeners.forEach((listener) => listener(s));
+    this.connectionListeners.forEach((l) => l(s));
   }
 }
 
