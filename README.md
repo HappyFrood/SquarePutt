@@ -36,7 +36,7 @@ How it works: SquarePutt speaks the Square's Bluetooth protocol directly (`src/l
   - commands are prefixed `0x11`
   - the putter code is `01 07`
   - the shot capacitor's charge is polled until it reports charged
-  - ball speed, launch and direction are read. Club metrics are requested after each putt, but in putter mode the Home Edition reports none (its reply's validity byte is 0). Set **Read putts as → Wedge** in the launch monitor panel to have the Square treat putts as wedge shots, which asks it for club data. You still just putt. Valid face and path are shown, and the setting is remembered. This is experimental: path needs the Square's reflective club sticker, and very slow putts may not register.
+  - ball speed, launch, start direction and spin are read. The Home Edition reports no club data (face, path) for putts: its club reply's validity byte is 0. Testing found it measures the club only on real swings (a wedge chip came back with full club data), not on putts in any club mode, so SquarePutt always reads putts in putter mode and doesn't show face or path.
   - the device state is in byte 3 of `11 03` (byte 2 is a counter), as seen on real hardware.
 - **Omni** follows [allsquare](https://github.com/divotmaker/allsquare) (MIT/Apache-2.0):
   - the putter code is `01 03`
@@ -67,7 +67,7 @@ For other GSPro-compatible monitors: close GSPro, run `npm run bridge` in a seco
 Free putting at any distance (3–50 ft), slope (Flat, Mild, Medium, Hard) and green speed (stimp 9–12). **New green** generates a different contour. The read panel tells you the putt like a caddie would: distance, uphill/downhill in inches, break direction and slope %, where to aim ("inside left edge", "1.5 cups right") and the ideal ball speed.
 
 ### Short putts — Pressure circle
-Survival drill from 3, 5 or 8 ft, or a **3→8 ft ladder** (three makes in a row moves you back a foot, a miss moves you up). Every putt comes from a different position around the hole, so each one breaks differently and has to be read. Makes in a row shrink the cup (to a minimum of 2.55″). Choose one, three or five lives. Tracks streak, make %, and face-angle spread graded Eagle → Bogey.
+Survival drill from 3, 5 or 8 ft, or a **3→8 ft ladder** (three makes in a row moves you back a foot, a miss moves you up). Every putt comes from a different position around the hole, so each one breaks differently and has to be read. Makes in a row shrink the cup (to a minimum of 2.55″). Choose one, three or five lives. Tracks streak, make %, and start-line spread (against your chosen line) graded Eagle → Bogey.
 
 ### Lag putts — Speed control
 Sets of 10 or 15 putts at 20, 30, 50 ft or **mixed 20–50 ft** (recommended: changing length every putt builds feel that transfers to the course).
@@ -95,10 +95,32 @@ Make % by distance against the PGA Tour average, a scatter of where missed putts
 
 - **Result:** holed, lipped out, or e.g. "2.1 ft short, 3 in left".
 - **Ball speed** and how it compares with the ideal speed for that putt ("4% firm").
-- **Start line** and how far it was from the ideal start line on that green ("0.5° right of ideal").
-- **Impact diagram:** putter face, path and start line from above (angles drawn 4× for clarity), with face (open/closed), path (in-to-out/out-to-in) and start direction.
-- **Skid, launch angle and roll distance**, with a note if launch is too low or high.
-- **Last 10 putts:** face angle and pace trend, with face-angle spread graded.
+- **Start line** and how far it was from the start line you chose ("0.5° right of your line").
+- **Launch angle, spin, skid and roll distance**, with a note if launch is too low or high.
+- **Last 10 putts:** start line (against your line) and pace trend, with start-line spread graded.
+
+The Square measures the ball, not the putter, so SquarePutt shows no face or path.
+
+### Diagnosis: read, start line or pace?
+
+When you choose your own start line, every putt is split into its three parts, with a one-line verdict ("Misread", "Pace cost it", "Holed — read, line and pace all good"):
+
+- **Read:** SquarePutt rolls *your* chosen line at perfect pace. If it drops, the read was good; if not, it says by how much you under-read or over-read the break (or aimed left/right on a straight putt), and where your line would have finished.
+- **Start line:** good within ~1.5 in at the hole (never stricter than 0.5°).
+- **Pace:** good within 8% of the ideal speed.
+
+The overall grade includes the read. With **Read + line** on, the read isn't tested: you're putting on the ideal line.
+
+**Stats → Green reading** collects this over time:
+- how often your reads would hole at perfect pace
+- the average gap between your aim and the ideal aim
+- how much of the break you play on breaking putts (100% = the ideal amount)
+- how often you under-read vs over-read
+- what cost your misses (read, start line, pace).
+
+### Choosing your start line
+
+Before each putt, pick the line you intend to start the ball on. Tap **◀ ▶** (bottom right of the green), press the **← →** arrow keys, or use a presentation remote (its **Page Up / Page Down** buttons). Each press moves the aim point at the hole by 1 inch per 10 ft of putt; hold a button to keep moving, and tap the label to reset to the hole. The start line on the green swings to match. Start-line results, the trend and drill spreads are then measured against this line, so you're grading your stroke, not your read. With **Help reading the putt → Read + line**, the start line is locked to the ideal line and the controls are disabled.
 
 Grades use the Quintic-style tiers: **Eagle** (tour level), **Birdie**, **Par**, **Bogey**.
 
@@ -159,11 +181,11 @@ Slope at the hole is capped to what superintendents use for that green speed (ab
 Plain Three.js, kept lightweight: one terrain mesh, a sky, a distant treeline. A low sun rakes across the green so slopes catch light and shadow. A small shader on the terrain draws the green edge, mowing stripes, and the optional overlays without extra geometry:
 
 - **Slope arrows** (as in the Square app): the slope is split into its two parts and shown on the 1 ft grid. Each grid edge carries one small arrow that slides from one grid crossing to the next in the downhill direction along that edge; edges across the putt show the left/right slope, edges toward the hole the uphill/downhill slope, so you combine the two to find the fall line. Steeper edges move their arrow faster, at a calm 0.1–0.6 grid edges per second. Slope is averaged over ~1.5 m, and edges under 0.5% show no arrow
-- **Show slopes:** on-screen height exaggeration (true, 2×, 3× default, 5×). Real greens rarely tilt more than 3°, which looks flat on a screen; this raises the shape for display only — the ball always rolls on the true-scale green
+- **Height exaggeration:** fixed at 3×, on screen only. Real greens rarely tilt more than 3°, which looks flat on a screen; the ball always rolls on the true-scale green
 - **1 ft grid:** bends with the surface
 - **Contour lines:** lines of equal height
 - **Height map:** red high, blue low
-- **Line to the hole** and **ideal line**
+- **Start line** (the line you chose, with a crossbar at hole distance) and **ideal line**
 
 Cameras: behind the ball, follow, overhead, and free (drag to rotate, scroll to zoom).
 

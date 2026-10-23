@@ -14,7 +14,7 @@ export interface AppSettings {
   readAssist: ReadAssist;
   /** Multiplier on measured ball speed, for launch monitor calibration. */
   speedCalibration: number;
-  /** On-screen height exaggeration of the green (display only). */
+  /** On-screen height exaggeration of the green (display only). Fixed at 3×; not user-facing. */
   slopeExaggeration: number;
   /** Real lidar-surveyed championship greens, or generated greens. */
   greenSource: 'real' | 'generated';
@@ -43,7 +43,8 @@ export function loadSettings(): AppSettings {
   if (typeof window === 'undefined') return DEFAULT_SETTINGS;
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw) };
+    // Slope display is fixed at 3× (no longer a user setting).
+    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw), slopeExaggeration: 3 };
   } catch {
     /* ignore */
   }

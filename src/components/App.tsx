@@ -41,6 +41,7 @@ import { MarkerSpec, RingSpec } from '@/components/green/greenScene';
 import { ReadChip, ResultBanner, PracticePad } from '@/components/hud/CanvasHud';
 import { LastPutt } from '@/components/hud/LastPutt';
 import { BallPlacement } from '@/components/hud/BallPlacement';
+import { AimControl } from '@/components/hud/AimControl';
 import { PressurePanel, LagPanel, ScramblePanel } from '@/components/drills/DrillPanels';
 import { SettingsDrawer } from '@/components/settings/SettingsDrawer';
 import { ConnectionDrawer } from '@/components/settings/ConnectionDrawer';
@@ -170,6 +171,39 @@ export default function App() {
     [surface, stimp, ball, layout.holeRadiusMultiplier, settings.speedCalibration]
   );
   const ideal = useMemo(() => solveIdealStroke({ ...setup, holeRadiusMultiplier: 1 }), [setup]);
+
+  /* ------------------------------ chosen start line ------------------------------ */
+  // Aim point at the hole, inches right (+) / left (−) of the cup; resets for every new putt.
+  const ballKey = `${layout.seed}|${ball.x.toFixed(3)}|${ball.z.toFixed(3)}`;
+  const [aim, setAim] = useState({ key: ballKey, inches: 0 });
+  if (aim.key !== ballKey) setAim({ key: ballKey, inches: 0 });
+  const aimLocked = settings.readAssist === 'line';
+  const distIn = Math.hypot(ball.x, ball.z) * 39.3701;
+  const aimIn = aim.key === ballKey ? aim.inches : 0;
+  const aimHlaDeg = aimLocked ? ideal.hlaDeg : (Math.atan2(aimIn, Math.max(1, distIn)) * 180) / Math.PI;
+  const nudgeAim = useCallback(
+    (dir: -1 | 1) => {
+      const step = Math.max(1, Math.round(distIn / 120)); // 1 in per 10 ft
+      const max = distIn * Math.tan((20 * Math.PI) / 180);
+      setAim((a) => ({ key: a.key, inches: Math.max(-max, Math.min(max, a.inches + dir * step)) }));
+    },
+    [distIn]
+  );
+  // Keyboard / remote: ← → arrows, or Page Up / Page Down (what presentation clickers send).
+  useEffect(() => {
+    if (mode === 'analytics' || aimLocked) return;
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (t && (t.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName))) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const dir = e.key === 'ArrowLeft' || e.key === 'PageUp' ? -1 : e.key === 'ArrowRight' || e.key === 'PageDown' ? 1 : 0;
+      if (!dir) return;
+      e.preventDefault();
+      if (!busy) nudgeAim(dir);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mode, aimLocked, busy, nudgeAim]);
   const read = useMemo(() => readPutt(surface, ball), [surface, ball]);
 
   const drillPlaying =
@@ -179,8 +213,8 @@ export default function App() {
     (mode === 'scramble-gauntlet' && sState?.status === 'playing');
 
   useEffect(() => {
-    openConnectService.setContext({ setup, layout, ideal, mode });
-  }, [setup, layout, ideal, mode]);
+    openConnectService.setContext({ setup, layout, ideal, mode, aimHlaDeg, aimSource: aimLocked ? 'ideal' : 'player' });
+  }, [setup, layout, ideal, mode, aimHlaDeg, aimLocked]);
   useEffect(() => {
     openConnectService.setAccepting(!busy && drillPlaying);
   }, [busy, drillPlaying]);
@@ -373,7 +407,8 @@ export default function App() {
               markers={markers}
               outline={outline}
               resetKey={resetKey}
-              exaggeration={settings.slopeExaggeration}
+              exaggeration={3}
+              aimDeg={aimHlaDeg}
               onRollComplete={onRollComplete}
             />
             <ReadChip read={read} ideal={settings.readAssist === 'off' ? null : ideal} assist={settings.readAssist} stimp={stimp} greenLabel={surface.label} rating={surface instanceof RealGreenSurface ? surface.difficulty : undefined} />
@@ -386,7 +421,17 @@ export default function App() {
             {filterNote && (
               <div className="absolute right-4 top-4 z-10 max-w-xs rounded-xl bg-club-950/90 px-4 py-2 text-sm text-mist ring-1 ring-line">{filterNote}</div>
             )}
-            {!live && <PracticePad ideal={ideal} disabled={busy || !drillPlaying} />}
+            {!live && <PracticePad ideal={ideal} aimDeg={aimHlaDeg} disabled={busy || !drillPlaying} />}
+            {!waitingForSetup && (
+              <AimControl
+                aimIn={aimIn}
+                aimDeg={aimHlaDeg}
+                locked={aimLocked}
+                disabled={busy}
+                onNudge={nudgeAim}
+                onReset={() => setAim((a) => ({ ...a, inches: 0 }))}
+              />
+            )}
             <BallPlacement ble={ble} active={!busy && drillPlaying} />
           </div>
 

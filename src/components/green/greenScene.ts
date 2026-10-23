@@ -177,6 +177,7 @@ export class GreenScene {
   private markerGroup = new THREE.Group();
   private trail: Line2 | null = null;
   private idealLine: Line2 | null = null;
+  private aimDeg = 0;
   private lineMats: LineMaterial[] = [];
   private sun!: THREE.DirectionalLight;
   private terrainKey = '';
@@ -505,6 +506,13 @@ vec3 spEmit = vec3(0.0);
     this.resetBeads();
   }
 
+  /** Chosen start line in degrees off the line to the hole (+ = right). */
+  setAim(deg: number) {
+    if (Math.abs(deg - this.aimDeg) < 1e-6) return;
+    this.aimDeg = deg;
+    this.rebuildOverlays();
+  }
+
   setOverlays(o: SceneOverlays) {
     this.overlays = { ...o };
     this.terrainUniforms.uGrid.value = o.grid ? 1 : 0;
@@ -786,13 +794,28 @@ vec3 spEmit = vec3(0.0);
       }
     }
     if (this.overlays.aimLine) {
+      // The chosen start line: from the ball, rotated aimDeg (+ = right) off the line to the hole,
+      // as long as the putt, with a short crossbar at its end.
+      const d = Math.hypot(this.ball.x, this.ball.z) || 1;
+      const fx = -this.ball.x / d;
+      const fz = -this.ball.z / d;
+      const rx = fz;
+      const rz = -fx; // same frame as the physics engine
+      const th = (this.aimDeg * Math.PI) / 180;
+      const dx = fx * Math.cos(th) + rx * Math.sin(th);
+      const dz = fz * Math.cos(th) + rz * Math.sin(th);
       const pts: THREE.Vector3[] = [];
       const n = 60;
       for (let i = 0; i <= n; i++) {
-        const t = i / n;
-        pts.push(this.drape(this.ball.x * (1 - t), this.ball.z * (1 - t), 0.004));
+        const t = (i / n) * d;
+        pts.push(this.drape(this.ball.x + dx * t, this.ball.z + dz * t, 0.004));
       }
       this.overlayGroup.add(this.fat(pts, '#7dd3fc', 2, 0.85, true));
+      const ex = this.ball.x + dx * d;
+      const ez = this.ball.z + dz * d;
+      const bar = 0.06;
+      const cross = [-1, 1].map((k) => this.drape(ex + dz * bar * k, ez - dx * bar * k, 0.004));
+      this.overlayGroup.add(this.fat(cross, '#7dd3fc', 3, 0.95));
     }
   }
 

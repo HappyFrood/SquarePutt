@@ -4,6 +4,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { PuttingShotData } from '@/lib/types';
 import { calculateBagMapping, clearShotHistory, exportSessionData, getDrillBests, importSessionData } from '@/lib/storage';
 import { calculateMean, calculateStdDev } from '@/lib/calculations';
+import { readStats } from '@/lib/diagnosis';
 import { Button, Panel, Segmented, signed } from '@/components/ui/controls';
 
 type Filter = 'all' | 'short' | 'mid' | 'lag';
@@ -25,6 +26,7 @@ export function StatsView({ shots, onDataChanged }: { shots: PuttingShotData[]; 
   const made = filtered.filter((s) => s.isHoled).length;
   const speedErr = filtered.filter((s) => s.speedErrorPct !== undefined).map((s) => s.speedErrorPct!);
   const lineErr = filtered.filter((s) => s.startLineErrorDeg !== undefined).map((s) => s.startLineErrorDeg!);
+  const rs = readStats(filtered);
 
   const exportData = () => {
     const blob = new Blob([exportSessionData()], { type: 'application/json' });
@@ -103,6 +105,58 @@ export function StatsView({ shots, onDataChanged }: { shots: PuttingShotData[]; 
             </p>
           </Panel>
         </div>
+
+        <Panel className="p-5">
+          <h2 className="text-lg font-bold">Green reading</h2>
+          {rs ? (
+            <>
+              <p className="text-sm text-mist">
+                From {rs.n} putts where you chose the start line. Your read is tested on its own: SquarePutt rolls your line at perfect pace and checks whether it drops.
+              </p>
+              <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
+                <Tile value={`${Math.round(rs.readMakePct)}%`} label="of your reads would hole at perfect pace" />
+                <Tile value={rs.avgErrorIn >= 12 ? `${(rs.avgErrorIn / 12).toFixed(1)} ft` : `${rs.avgErrorIn.toFixed(1)} in`} label="average gap between your aim and the ideal aim" />
+                <Tile
+                  value={rs.breakPlayedPct !== null ? `${Math.round(rs.breakPlayedPct)}%` : '–'}
+                  label={
+                    rs.breakPlayedPct === null
+                      ? 'of the break played (no breaking putts yet)'
+                      : `of the break you play on breaking putts (${rs.breaking}) — ${rs.breakPlayedPct < 90 ? 'you tend to under-read' : rs.breakPlayedPct > 110 ? 'you tend to over-read' : 'about right'}`
+                  }
+                />
+                <Tile
+                  value={rs.breaking ? `${Math.round(rs.underPct)}% / ${Math.round(rs.overPct)}%` : '–'}
+                  label="breaking putts under-read / over-read"
+                />
+              </div>
+              {rs.missCause && (
+                <div className="mt-5">
+                  <div className="text-sm font-semibold text-mist">What cost your {rs.missCause.misses === 1 ? 'miss' : `${rs.missCause.misses} misses`}</div>
+                  <div className="mt-2 space-y-2">
+                    {(
+                      [
+                        ['Read', rs.missCause.readPct],
+                        ['Start line', rs.missCause.linePct],
+                        ['Pace', rs.missCause.pacePct],
+                      ] as const
+                    ).map(([label, pct]) => (
+                      <div key={label} className="grid grid-cols-[88px_1fr_48px] items-center gap-3">
+                        <span className="text-sm text-chalk">{label}</span>
+                        <div className="h-3 rounded-full bg-club-800">
+                          <div className="h-3 rounded-full bg-bogey" style={{ width: `${Math.max(pct > 0 ? 2 : 0, pct)}%` }} />
+                        </div>
+                        <span className="num text-right text-sm text-chalk">{Math.round(pct)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-xs text-fog">A miss can count against more than one. Start line within ~1.5 in at the hole (at least 0.5°) and pace within 8% count as good.</p>
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="mt-1 text-sm text-mist">Choose your own start line before putting (◀ ▶, arrow keys or a remote) with &ldquo;Read + line&rdquo; off, and your green-reading accuracy appears here.</p>
+          )}
+        </Panel>
 
         <div className="grid gap-6 md:grid-cols-[2fr_1fr]">
           <Panel className="p-5">

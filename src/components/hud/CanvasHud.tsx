@@ -88,7 +88,7 @@ export function ResultBanner({ event }: { event: DrillEvent | null }) {
 }
 
 /** Bottom-left: hit virtual putts when no launch monitor is attached. */
-export function PracticePad({ ideal, disabled }: { ideal: IdealStroke | null; disabled: boolean }) {
+export function PracticePad({ ideal, aimDeg, disabled }: { ideal: IdealStroke | null; aimDeg: number; disabled: boolean }) {
   const [open, setOpen] = useState(false);
   const [speedPct, setSpeedPct] = useState(0);
   const [lineDeg, setLineDeg] = useState(0);
@@ -96,7 +96,7 @@ export function PracticePad({ ideal, disabled }: { ideal: IdealStroke | null; di
 
   const hit = (dSpeedPct: number, dLine: number, face?: number, path?: number) => {
     const mph = ideal.ballSpeedMph * (1 + dSpeedPct / 100);
-    const hla = ideal.hlaDeg + dLine;
+    const hla = aimDeg + dLine;
     openConnectService.triggerSimulatedShot({ ballSpeedMph: mph, hlaDeg: hla, faceAngleDeg: face ?? hla / 0.82, pathDeg: path ?? 0 });
   };
   const gauss = () => {
@@ -110,7 +110,7 @@ export function PracticePad({ ideal, disabled }: { ideal: IdealStroke | null; di
   const realistic = () => {
     const path = gauss() * 1.2;
     const faceErr = gauss() * 0.75;
-    hit(gauss() * 6, faceErr * 0.83 + path * 0.17, ideal.hlaDeg + faceErr, path);
+    hit(gauss() * 6, faceErr * 0.83 + path * 0.17, aimDeg + faceErr, path);
   };
 
   const presets: { label: string; run: () => void }[] = [
@@ -152,7 +152,7 @@ export function PracticePad({ ideal, disabled }: { ideal: IdealStroke | null; di
           </label>
           <label className="block">
             <span className="flex justify-between text-mist">
-              Start line vs ideal <span className="num text-chalk">{lineDeg > 0 ? `${lineDeg.toFixed(1)}° right` : lineDeg < 0 ? `${(-lineDeg).toFixed(1)}° left` : 'on line'}</span>
+              Start line vs your line <span className="num text-chalk">{lineDeg > 0 ? `${lineDeg.toFixed(1)}° right` : lineDeg < 0 ? `${(-lineDeg).toFixed(1)}° left` : 'on line'}</span>
             </span>
             <input type="range" min={-4} max={4} step={0.1} value={lineDeg} onChange={(e) => setLineDeg(parseFloat(e.target.value))} className="mt-2 w-full" />
           </label>

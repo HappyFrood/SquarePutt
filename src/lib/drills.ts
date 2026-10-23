@@ -95,7 +95,8 @@ export function pressureOnShot(s: PressureState, shot: PuttingShotData): { state
   const n: PressureState = {
     ...s,
     attempts: s.attempts + 1,
-    faceAngles: [...s.faceAngles, shot.faceAngleDeg],
+    // Start line against the chosen line (the Square measures start direction, not face).
+    faceAngles: [...s.faceAngles, shot.startLineErrorDeg ?? shot.hla],
     history: [...s.history, shot.isHoled],
     clock: (s.clock + 5) % 12, // jump around the clock so consecutive breaks differ
   };

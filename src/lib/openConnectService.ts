@@ -6,7 +6,7 @@
  * relays shots to this page over a local WebSocket (default ws://127.0.0.1:9210).
  */
 
-import { RawOpenConnectPacket, PuttingShotData, ConnectionState, AppMode, PuttLayout } from './types';
+import { RawOpenConnectPacket, PuttingShotData, ConnectionState, AppMode, PuttLayout, ReadCheck } from './types';
 import { NormalizedStroke, telemetrySanitizer } from './dataSanitizer';
 import { IdealStroke, PuttSetup, simulatePutt, MPH_TO_MPS } from './physicsEngine';
 import { gradeFaceAngle, gradePutterPath, analyzeDynamicLoft, gradeSpeedError } from './calculations';
@@ -24,6 +24,10 @@ export interface ShotContext {
   layout: PuttLayout;
   ideal: IdealStroke | null;
   mode: AppMode;
+  /** Start line the player chose (deg, + right of the hole). Start line is graded against this. */
+  aimHlaDeg?: number;
+  /** 'player' when the player picked the line (enables the read check); 'ideal' with "Read + line". */
+  aimSource?: 'player' | 'ideal';
 }
 
 class OpenConnectService {
@@ -183,15 +187,45 @@ class OpenConnectService {
 
     const effSpeed = s.ballSpeedMph * (ctx.setup.speedCalibration ?? 1);
     const speedErrorPct = ctx.ideal ? ((effSpeed - ctx.ideal.ballSpeedMph) / ctx.ideal.ballSpeedMph) * 100 : undefined;
-    const startLineErrorDeg = ctx.ideal ? s.hlaDeg - ctx.ideal.hlaDeg : undefined;
+    const aim = ctx.aimHlaDeg ?? ctx.ideal?.hlaDeg;
+    const startLineErrorDeg = aim !== undefined ? s.hlaDeg - aim : undefined;
 
-    // On a breaking putt the right start line isn't at the hole, so grade against the ideal line.
+    // Green reading: would the chosen line have holed at ideal pace? (the read on its own, stroke removed)
+    let read: ReadCheck | undefined;
+    if (ctx.ideal && aim !== undefined && ctx.aimSource === 'player') {
+      const distIn = Math.hypot(ctx.setup.ball.x, ctx.setup.ball.z) * 39.3701;
+      const aimIn = Math.tan((aim * Math.PI) / 180) * distIn;
+      const idealIn = ctx.ideal.aimOffsetIn;
+      const errorIn = aimIn - idealIn;
+      const rs = simulatePutt({ ...ctx.setup, speedCalibration: 1 }, { ballSpeedMph: ctx.ideal.ballSpeedMph, hlaDeg: aim }, { dt: 0.002 });
+      const verdict: ReadCheck['verdict'] = rs.isHoled
+        ? 'good'
+        : Math.abs(idealIn) < 1
+        ? errorIn > 0
+          ? 'right'
+          : 'left'
+        : errorIn * Math.sign(idealIn) > 0
+        ? 'over'
+        : 'under';
+      read = {
+        aimIn: Number(aimIn.toFixed(1)),
+        idealIn: Number(idealIn.toFixed(1)),
+        errorIn: Number(errorIn.toFixed(1)),
+        holesAtIdealPace: rs.isHoled,
+        missIn: Number((rs.lateralErrorIn ?? 0).toFixed(1)),
+        verdict,
+      };
+    }
+
+    // Start line is graded against the line the player chose (the ideal one with "Read + line").
     const faceGrade = gradeFaceAngle(startLineErrorDeg ?? s.faceAngleDeg);
     const pathGrade = gradePutterPath(s.pathDeg);
     const speedGrade: QuinticGrade = speedErrorPct !== undefined ? gradeSpeedError(speedErrorPct) : 'par';
     const loft = analyzeDynamicLoft(s.dynamicLoftDeg, s.aoaDeg, s.vlaDeg);
     const rank: Record<QuinticGrade, number> = { eagle: 0, birdie: 1, par: 2, bogey: 3 };
-    const worst = Math.max(rank[faceGrade], rank[speedGrade]);
+    // The read counts too: a line that holes at perfect pace is eagle; within 3 in of ideal, par; else bogey.
+    const readRank = !read ? 0 : read.holesAtIdealPace ? 0 : Math.abs(read.errorIn) <= 3 ? 2 : 3;
+    const worst = Math.max(rank[faceGrade], rank[speedGrade], readRank);
     const overall = sim.isHoled && worst > 1 ? 'birdie' : (['eagle', 'birdie', 'par', 'bogey'] as QuinticGrade[])[worst];
 
     const rollFt = sim.pathLengthFt;
@@ -234,6 +268,8 @@ class OpenConnectService {
       skidPercentage: Number(((skidFt / Math.max(0.01, rollFt)) * 100).toFixed(1)),
       idealSpeedMph: ctx.ideal?.ballSpeedMph,
       idealHlaDeg: ctx.ideal?.hlaDeg,
+      aimHlaDeg: aim !== undefined ? Number(aim.toFixed(2)) : undefined,
+      read,
       speedErrorPct: speedErrorPct !== undefined ? Number(speedErrorPct.toFixed(1)) : undefined,
       startLineErrorDeg: startLineErrorDeg !== undefined ? Number(startLineErrorDeg.toFixed(2)) : undefined,
       grades: {

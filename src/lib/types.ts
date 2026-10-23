@@ -72,6 +72,20 @@ export interface PuttLayout {
   greenRadiusM?: number;
 }
 
+export interface ReadCheck {
+  /** Where the player aimed at the hole, inches (+ right of the cup). */
+  aimIn: number;
+  /** Where the ideal line aims at the hole, inches (+ right). */
+  idealIn: number;
+  /** aimIn − idealIn. */
+  errorIn: number;
+  /** Would the player's line have holed at ideal pace? */
+  holesAtIdealPace: boolean;
+  /** Where the ball finishes on the player's line at ideal pace, inches right (+) / left of the hole. */
+  missIn: number;
+  verdict: 'good' | 'over' | 'under' | 'left' | 'right';
+}
+
 export interface PuttingShotData {
   id: string;
   timestamp: number;
@@ -120,7 +134,11 @@ export interface PuttingShotData {
   idealSpeedMph?: number;
   idealHlaDeg?: number;
   speedErrorPct?: number; // + = too firm
-  startLineErrorDeg?: number; // + = right of ideal line
+  /** The start line the player chose (deg off the line to the hole, + right); the ideal one with "Read + line". */
+  aimHlaDeg?: number;
+  startLineErrorDeg?: number; // + = right of the chosen start line
+  /** Green-reading check (only when the player chose the line, not with "Read + line"). */
+  read?: ReadCheck;
 
   grades: {
     faceAngleGrade: QuinticGrade;

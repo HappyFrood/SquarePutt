@@ -21,6 +21,8 @@ interface Props {
   resetKey: number;
   /** Display-only vertical exaggeration of the green. */
   exaggeration: number;
+  /** Chosen start line, degrees off the line to the hole (+ right). */
+  aimDeg: number;
   onRollComplete: () => void;
 }
 
@@ -37,6 +39,7 @@ export function PuttingGreenCanvas({
   outline,
   resetKey,
   exaggeration,
+  aimDeg,
   onRollComplete,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -88,6 +91,10 @@ export function PuttingGreenCanvas({
   useEffect(() => {
     sceneRef.current?.setOverlays(overlays);
   }, [overlays]);
+
+  useEffect(() => {
+    sceneRef.current?.setAim(aimDeg);
+  }, [aimDeg]);
 
   useEffect(() => {
     sceneRef.current?.setCameraMode(cameraMode);

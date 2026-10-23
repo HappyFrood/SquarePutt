@@ -160,22 +160,7 @@ export function SettingsDrawer({
                   ? 'Read it yourself, like on the course.'
                   : s.readAssist === 'read'
                   ? 'Shows slope, elevation and where to aim.'
-                  : 'Also draws the ideal path at perfect speed.'}
-              </p>
-            </Field>
-            <Field label="Show slopes">
-              <Segmented
-                value={s.slopeExaggeration}
-                onChange={(v) => onChange({ slopeExaggeration: v })}
-                options={[
-                  { value: 1, label: 'True' },
-                  { value: 2, label: '2×' },
-                  { value: 3, label: '3×' },
-                  { value: 5, label: '5×' },
-                ]}
-              />
-              <p className="text-xs text-fog">
-                Real greens rarely tilt more than 3°, which looks flat on a screen. This raises the hills and hollows on screen only — the ball always rolls on the true-scale green.
+                  : 'Also draws the ideal path at perfect speed, and sets your start line to it.'}
               </p>
             </Field>
             <div className="divide-y divide-line/60">
@@ -183,7 +168,7 @@ export function SettingsDrawer({
               <Toggle checked={s.grid} onChange={(v) => onChange({ grid: v })} label="1 ft grid" hint="Bends with the surface to show contour" />
               <Toggle checked={s.contours} onChange={(v) => onChange({ contours: v })} label="Contour lines" hint="Lines of equal height" />
               <Toggle checked={s.heatmap} onChange={(v) => onChange({ heatmap: v })} label="Height map" hint="Red is high, blue is low" />
-              <Toggle checked={s.aimLine} onChange={(v) => onChange({ aimLine: v })} label="Line to the hole" />
+              <Toggle checked={s.aimLine} onChange={(v) => onChange({ aimLine: v })} label="Start line" hint="The line you've chosen. Move it with the ◀ ▶ buttons, the arrow keys or a presentation remote." />
             </div>
           </Group>
 

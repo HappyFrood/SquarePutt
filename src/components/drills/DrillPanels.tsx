@@ -129,7 +129,7 @@ export function PressurePanel({
         <History items={state.history} />
         {state.faceAngles.length >= 3 && (
           <div className="flex items-center justify-between text-sm">
-            <span className="text-mist">Face angle spread ±{sd.toFixed(2)}°</span>
+            <span className="text-mist">Start line spread ±{sd.toFixed(2)}°</span>
             <Grade grade={gradeFaceAngleVariance(sd)} />
           </div>
         )}

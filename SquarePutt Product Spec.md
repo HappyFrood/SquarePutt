@@ -10,7 +10,7 @@ SquarePutt connects to the Square itself over Web Bluetooth (revision 1's zero-h
 
 *   **The Interface & Physics Engine (Web App):** Next.js, React, Three.js and Tailwind CSS. Runs in the browser.
     *   **Physics:** SquarePutt's own engine, based on published putting research (Penner 2002; Holmes 1991) and calibrated against measured launch-monitor putting data. *(Revision 1 planned to fork `rroojrooj/Open-Birdie`; this was not needed.)*
-*   **Direct Bluetooth (primary):** The web app connects to the Square Golf launch monitor itself over Web Bluetooth (Chrome/Edge on a laptop), speaking each model's own dialect. **Home Edition** (per squaregolf-connector, corrected from a hardware log): commands prefixed `0x11`, putter `01 07`, state at byte 3 (byte 2 is a counter), capacitor charge polled, club metrics requested per putt; in putter mode the device reports none (validity byte 0), so a remembered "Read putts as: Putter / Wedge" setting selects a wedge (Home `0c 06`) to obtain face/path; when absent, face is estimated from start line and path is shown as not measured. **Omni** (per allsquare): putter `01 03`, units set, club metrics requested per shot. Common to both: select putter (putting mode), arm detection, 5 s heartbeat, re-arm about 1.2 s after every putt and whenever the device reports idle. The model is detected from the advertisement where the browser allows, otherwise chosen by the user (default Home Edition). Ball placement: the device's ready flag must hold 0.4 s before the ball counts as set; a guide shows the ball position against the read zone learned from the device. *(Supersedes revision 1's "zero-hardware-code" plan for Square users.)*
+*   **Direct Bluetooth (primary):** The web app connects to the Square Golf launch monitor itself over Web Bluetooth (Chrome/Edge on a laptop), speaking each model's own dialect. **Home Edition** (per squaregolf-connector, corrected from a hardware log): commands prefixed `0x11`, putter `01 07`, state at byte 3 (byte 2 is a counter), capacitor charge polled, always putter mode. Club metrics are requested per putt, but the device reports none for putts (validity byte 0); it returns club data only for real swings, so no face/path is shown. **Omni** (per allsquare): putter `01 03`, units set, club metrics requested per shot. Common to both: select putter (putting mode), arm detection, 5 s heartbeat, re-arm about 1.2 s after every putt and whenever the device reports idle. The model is detected from the advertisement where the browser allows, otherwise chosen by the user (default Home Edition). Ball placement: the device's ready flag must hold 0.4 s before the ball counts as set; a guide shows the ball position against the read zone learned from the device. *(Supersedes revision 1's "zero-hardware-code" plan for Square users.)*
 *   **The Data Bridge (other monitors):** Community connectors (the Square Golf software's GSPro integration, other GSPro Open Connect connectors) speak the GSPro Open Connect v1 protocol: they open a **TCP** connection to a GSPro server on `127.0.0.1:921`. A browser cannot accept TCP connections, so SquarePutt includes a small zero-dependency Node.js **bridge** (`npm run bridge`) that:
     *   listens on TCP 921 and behaves like GSPro (acknowledges shots with code 200),
     *   sends the "player information" message with a **putter** selected so the monitor switches to putting mode,
@@ -49,12 +49,15 @@ SquarePutt connects to the Square itself over Web Bluetooth (revision 1's zero-h
 Any distance (3–50 ft), any slope, new greens on demand.
 
 **Metrics Displayed:**
-*   **Ball Data:** Ball Speed (vs ideal), Start Line / HLA (vs ideal), Roll Distance, Skid, Launch Angle.
-*   **Club Data:** Face Angle, Putter Path, Angle of Attack, Dynamic Loft.
+*   **Ball Data:** Ball Speed (vs ideal), Start Line / HLA (vs the player's chosen line), Launch Angle, Spin, Skid, Roll Distance.
+*   **Club Data:** none. The Square Home Edition reports no face or path for putts (tested in putter and wedge modes), so neither is shown.
 
 **UI/UX:**
-*   **Impact diagram:** top-down putter face, path and start line (angles exaggerated 4× and labelled as such), with values below.
-*   **Trend:** face angle and pace over the last 10 putts, with face-angle spread graded.
+*   **Start line selection:** before each putt the player sets an intended start line with on-screen ◀ ▶ buttons, the ← → keys, or a presentation remote (Page Up / Page Down). Step: 1 in at the hole per 10 ft; hold to repeat; tap the label to reset. Drawn on the green with a crossbar at hole distance. Locked to the ideal line, with controls disabled, when "Read + line" is on.
+*   **Trend:** start line (vs chosen line) and pace over the last 10 putts, with start-line spread graded.
+*   **Diagnosis (read · start line · pace):** when the player chose the line, the chosen line is simulated at ideal pace. If it holes, the read is good; otherwise it's classed as under-read / over-read (or left / right on a straight putt) by the gap in inches at the hole. Start line is good within max(0.5°, the angle that moves the ball 1.5 in at the hole); pace is good within 8%. A one-line verdict names what cost the putt, and the overall grade includes the read (holes = Eagle, within 3 in = Par, else Bogey).
+*   **Green-reading stats:** read make % at ideal pace, average aim gap, median share of the break played, under- vs over-read rate on breaking putts, and the share of misses where the read, start line or pace was off.
+*   **Display:** green height exaggerated 3× on screen (fixed; not a user setting).
 *   **Virtual putts:** simulated strokes (realistic, perfect, push, pull, firm, soft, custom) for use without a launch monitor.
 
 ### 5.2 Gamified Putting Drills
@@ -65,11 +68,11 @@ All drills use the **Quintic-inspired color-coding system**:
 *   **Red (Bogey):** Poor/High variance
 
 #### A. Short Putts ("The Pressure Circle")
-*   **Goal:** Make-percentage and face control under pressure, on putts that break.
+*   **Goal:** Make-percentage and start-line control under pressure, on putts that break.
 *   **Distances:** 3 ft, 5 ft, 8 ft, or a **3→8 ft ladder** (three makes in a row moves back one foot; a miss moves forward one foot).
 *   **Around the clock:** every putt comes from a different position around the hole, so each putt breaks differently and must be read (slope selectable; Mild by default).
 *   **Gamification:** "Survival Mode" with **1, 3 or 5 lives**. The cup shrinks with each consecutive make (4% per make, minimum 2.55″) and resets on a miss. Milestone celebrations at 5, 10, 15, 25 and 50 in a row. Personal best streak is saved.
-*   **Dispersion Metric:** Face Angle standard deviation across the session, graded Eagle–Bogey.
+*   **Dispersion Metric:** start-line standard deviation (against the chosen line) across the session, graded Eagle–Bogey.
 
 #### B. Lag Putts ("Speed Control Zone")
 *   **Goal:** Distance control and ball speed consistency.

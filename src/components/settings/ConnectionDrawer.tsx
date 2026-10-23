@@ -134,26 +134,6 @@ export function ConnectionDrawer({ open, onClose, state, ble }: { open: boolean;
                     </table>
                   )}
                 </div>
-                <div className="space-y-2 rounded-xl bg-club-950/60 p-3 text-sm text-mist ring-1 ring-line">
-                  <span className="font-semibold text-chalk">Read putts as</span>
-                  <Segmented
-                    value={ble.clubMode}
-                    onChange={(m) => {
-                      setCode('');
-                      squareBle.setClubMode(m);
-                    }}
-                    options={[
-                      { value: 'putter', label: 'Putter' },
-                      { value: 'wedge', label: 'Wedge (face & path)' },
-                    ]}
-                    size="sm"
-                  />
-                  <p className="text-xs">
-                    {ble.clubMode === 'wedge'
-                      ? 'Experiment: the Square thinks you hold a wedge, which asks it for club data. Putt as normal. Path needs its club sticker; very slow putts may not register.'
-                      : 'Putter mode: the Home Edition reports ball data only — no face or path.'}
-                  </p>
-                </div>
                 <div className="flex gap-2">
                   <Button variant="quiet" className="flex-1" onClick={() => squareBle.selectPutter(opts)}>
                     Re-arm

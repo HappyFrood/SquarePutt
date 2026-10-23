@@ -1,5 +1,20 @@
 # Changelog
 
+## 2.4.0 — October 2026
+
+### Added
+- **Read · start line · pace diagnosis** for every putt where you chose the line. SquarePutt rolls your line at perfect pace to test the read on its own (good, or under-read / over-read by N in), checks start line (within ~1.5 in at the hole, at least 0.5°) and pace (within 8%), and gives a verdict such as "Misread" or "Pace cost it". The overall grade now includes the read.
+- **Stats → Green reading:** read make % at perfect pace, average aim gap, share of the break you play, under/over-read rate, and what cost your misses.
+- **Choose your start line.** Tap ◀ ▶ (bottom right of the green), press ← →, or use a presentation remote (Page Up / Page Down). Each press moves the aim point 1 inch per 10 ft of putt; hold to repeat, and tap the label to reset to the hole. The start line on the green swings to match and ends in a crossbar at hole distance. It resets for each new putt. With "Read + line" on, the start line is locked to the ideal line and the controls are disabled.
+- Start line is now graded against the line you chose, not the ideal line: the Last putt panel ("On your line", "0.4° right of your line"), the stats, the trend and the virtual putts all use it.
+- Spin is shown in the Last putt panel.
+
+### Removed
+- **Face and path, and the impact diagram.** The Home Edition doesn't measure them on putts (tested in putter and wedge modes), so SquarePutt no longer shows an estimate as if it were measured. The Last putt trend and the Pressure Circle spread now use start line.
+- **"Read putts as" (wedge mode)** from the launch monitor panel. Putts are always read in putter mode, and a saved wedge choice is cleared. The custom club code box stays.
+- **"Show slopes"** setting: the green's on-screen height is fixed at 3×.
+
+
 ## 2.3.3 — October 2026
 
 ### Fixed (from a real Home Edition log)

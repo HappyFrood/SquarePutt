@@ -34,12 +34,14 @@ export type SquareClubMode = 'putter' | 'wedge';
 const CLUB_MODE_KEY = 'squareputt_square_clubmode_v1';
 export const WEDGE_CODE: Record<SquareModel, [number, number]> = { home: [0x0c, 0x06], omni: [0x0c, 0x02] };
 
+/** Putts are always read in putter mode (no UI for wedge mode: it gave no club data on putts). */
 function loadClubMode(): SquareClubMode {
   try {
-    return JSON.parse(localStorage.getItem(CLUB_MODE_KEY) ?? 'null') === 'wedge' ? 'wedge' : 'putter';
+    localStorage.removeItem(CLUB_MODE_KEY); // clear the old experiment setting
   } catch {
-    return 'putter';
+    /* ignore */
   }
+  return 'putter';
 }
 
 function loadModel(): SquareModel {

@@ -3,9 +3,10 @@
 import React from 'react';
 import { PuttingShotData } from '@/lib/types';
 import { analyzeDynamicLoft, calculateStdDev, gradeFaceAngleVariance } from '@/lib/calculations';
-import { Grade, Panel, signed } from '@/components/ui/controls';
+import { Grade, Panel } from '@/components/ui/controls';
+import { Check, X } from 'lucide-react';
+import { diagnose, DiagPart } from '@/lib/diagnosis';
 
-const K = 4; // angle exaggeration in the diagram
 
 function outcome(s: PuttingShotData) {
   if (s.isHoled) return 'Holed';
@@ -17,49 +18,13 @@ function outcome(s: PuttingShotData) {
   return (s.lipOut ? 'Lipped out · ' : '') + parts.join(', ');
 }
 
-const dirWord = (v: number, pos: string, neg: string, eps = 0.15) => (Math.abs(v) < eps ? 'square' : v > 0 ? pos : neg);
-
-export function ImpactDiagram({ shot }: { shot: PuttingShotData }) {
-  const face = shot.faceAngleDeg * K;
-  const path = shot.putterPathDeg * K;
-  const showPath = shot.clubMeasured !== false;
-  const start = shot.hla * K;
-  const cx = 150;
-  const cy = 112;
-  return (
-    <svg viewBox="0 0 300 190" className="w-full" role="img" aria-label="Putter face, path and start line at impact, seen from above">
-      <line x1={cx} y1={8} x2={cx} y2={182} stroke="#6f8a7c" strokeWidth={1.5} strokeDasharray="5 5" />
-      <text x={cx + 6} y={18} fill="#6f8a7c" fontSize={11}>to target</text>
-      {/* path (only when measured) */}
-      {showPath && (
-        <g transform={`rotate(${path} ${cx} ${cy})`}>
-          <line x1={cx} y1={cy + 70} x2={cx} y2={cy - 30} stroke="#4fb3ff" strokeWidth={3} strokeLinecap="round" />
-          <path d={`M ${cx - 6} ${cy - 24} L ${cx} ${cy - 36} L ${cx + 6} ${cy - 24} Z`} fill="#4fb3ff" />
-        </g>
-      )}
-      {/* start line */}
-      <g transform={`rotate(${start} ${cx} ${cy})`}>
-        <line x1={cx} y1={cy - 12} x2={cx} y2={cy - 92} stroke="#f5c84c" strokeWidth={3} strokeLinecap="round" />
-        <path d={`M ${cx - 7} ${cy - 86} L ${cx} ${cy - 100} L ${cx + 7} ${cy - 86} Z`} fill="#f5c84c" />
-      </g>
-      {/* putter face */}
-      <g transform={`rotate(${face} ${cx} ${cy})`}>
-        <rect x={cx - 48} y={cy + 11} width={96} height={12} rx={3} fill="#1a3629" stroke="#eef2ea" strokeWidth={1.5} />
-        <line x1={cx - 48} y1={cy + 11} x2={cx + 48} y2={cy + 11} stroke="#eef2ea" strokeWidth={3.5} />
-        <line x1={cx} y1={cy + 13} x2={cx} y2={cy + 21} stroke="#eef2ea" strokeWidth={1.5} />
-      </g>
-      <circle cx={cx} cy={cy} r={9} fill="#ffffff" />
-      <text x={292} y={184} fill="#6f8a7c" fontSize={10} textAnchor="end">angles drawn {K}× actual</text>
-    </svg>
-  );
-}
 
 export function LastPutt({ shot, recent }: { shot: PuttingShotData | null; recent: PuttingShotData[] }) {
   if (!shot) {
     return (
       <Panel className="p-5">
         <h3 className="text-base font-bold">Last putt</h3>
-        <p className="mt-2 text-sm text-mist">Your stroke data shows up here after each putt — speed, start line, face and path, and how it compares with the ideal stroke.</p>
+        <p className="mt-2 text-sm text-mist">Your stroke data shows up here after each putt — ball speed, start line against the line you chose, launch and spin.</p>
       </Panel>
     );
   }
@@ -88,27 +53,17 @@ export function LastPutt({ shot, recent }: { shot: PuttingShotData | null; recen
           label="Start line"
           value={`${Math.abs(shot.hla).toFixed(1)}°`}
           unit={Math.abs(shot.hla) < 0.05 ? 'straight' : shot.hla > 0 ? 'right' : 'left'}
-          note={lineErr !== undefined ? (Math.abs(lineErr) < 0.1 ? 'On your line' : `${Math.abs(lineErr).toFixed(1)}° ${lineErr > 0 ? 'right' : 'left'} of ideal`) : undefined}
+          note={lineErr !== undefined ? (Math.abs(lineErr) < 0.1 ? 'On your line' : `${Math.abs(lineErr).toFixed(1)}° ${lineErr > 0 ? 'right' : 'left'} of your line`) : undefined}
           grade={shot.grades.faceAngleGrade}
         />
       </div>
 
-      <div className="px-5 pt-4">
-        <ImpactDiagram shot={shot} />
-        <div className="mt-2 grid grid-cols-3 gap-2 pb-4">
-          <Angle color="bg-chalk" label={shot.clubMeasured === false ? 'Face (est.)' : 'Face'} value={shot.faceAngleDeg} word={dirWord(shot.faceAngleDeg, 'open', 'closed')} />
-          {shot.clubMeasured === false ? (
-            <Angle color="bg-eagle" label="Path" value={null} word="not measured" />
-          ) : (
-            <Angle color="bg-eagle" label="Path" value={shot.putterPathDeg} word={dirWord(shot.putterPathDeg, 'in-to-out', 'out-to-in')} />
-          )}
-          <Angle color="bg-flag" label="Start" value={shot.hla} word={dirWord(shot.hla, 'right', 'left', 0.05)} />
-        </div>
-      </div>
+      <Diagnosis shot={shot} />
 
-      <div className="grid grid-cols-3 gap-px border-t border-line bg-line text-center">
-        <Small label="Skid" value={`${shot.skidDistanceInches.toFixed(0)} in`} />
+      <div className="grid grid-cols-4 gap-px border-t border-line bg-line text-center">
         <Small label="Launch" value={`${shot.vla.toFixed(1)}°`} tone={loft.status === 'optimal' ? 'text-birdie' : 'text-par'} />
+        <Small label="Spin" value={shot.backspinRpm !== undefined && shot.backspinRpm !== 0 ? `${Math.round(shot.backspinRpm)}` : '–'} />
+        <Small label="Skid" value={`${shot.skidDistanceInches.toFixed(0)} in`} />
         <Small label="Rolled" value={`${shot.rollDistanceFt.toFixed(1)} ft`} />
       </div>
       {loft.status !== 'optimal' && <p className="bg-club-900 px-5 py-2 text-xs text-mist">{loft.status === 'low' ? 'Low launch: ball is driven into the turf — check shaft lean.' : 'High launch: the ball hops — reduce dynamic loft.'}</p>}
@@ -134,18 +89,6 @@ function Metric({ label, value, unit, note, grade }: { label: string; value: str
   );
 }
 
-function Angle({ color, label, value, word }: { color: string; label: string; value: number | null; word: string }) {
-  return (
-    <div>
-      <div className="flex items-center gap-1.5 text-xs text-fog">
-        <span className={`h-1 w-3 rounded-full ${color}`} />
-        {label}
-      </div>
-      <div className="num text-2xl font-semibold">{value === null ? '–' : `${signed(value)}°`}</div>
-      <div className="text-xs text-mist">{word}</div>
-    </div>
-  );
-}
 
 function Small({ label, value, tone = 'text-chalk' }: { label: string; value: string; tone?: string }) {
   return (
@@ -156,15 +99,18 @@ function Small({ label, value, tone = 'text-chalk' }: { label: string; value: st
   );
 }
 
-/** Rolling last-10 trend: face angle and speed error, newest on the right. */
+/** Start line relative to the chosen line (falls back to raw start direction for older putts). */
+const lineOf = (s: PuttingShotData) => s.startLineErrorDeg ?? s.hla;
+
+/** Rolling last-10 trend: start line and speed error, newest on the right. */
 function Trend({ recent }: { recent: PuttingShotData[] }) {
   const shots = [...recent].reverse();
-  const faces = shots.map((s) => s.faceAngleDeg);
-  const sd = calculateStdDev(faces);
+  const lines = shots.map(lineOf);
+  const sd = calculateStdDev(lines);
   const w = 300;
   const h = 64;
   const x = (i: number) => 10 + (i * (w - 20)) / Math.max(1, shots.length - 1);
-  const yFace = (v: number) => h / 2 - Math.max(-3, Math.min(3, v)) * (h / 2 - 6) / 3;
+  const yLine = (v: number) => h / 2 - Math.max(-3, Math.min(3, v)) * (h / 2 - 6) / 3;
   const speeds = shots.map((s) => s.speedErrorPct ?? 0);
   const ySpeed = (v: number) => h / 2 - Math.max(-20, Math.min(20, v)) * (h / 2 - 6) / 20;
   return (
@@ -172,20 +118,54 @@ function Trend({ recent }: { recent: PuttingShotData[] }) {
       <div className="flex items-center justify-between">
         <span className="text-sm font-semibold text-mist">Last {shots.length} putts</span>
         <span className="flex items-center gap-2 text-xs text-mist">
-          Face spread ±{sd.toFixed(2)}° <Grade grade={gradeFaceAngleVariance(sd)} />
+          Start line spread ±{sd.toFixed(2)}° <Grade grade={gradeFaceAngleVariance(sd)} />
         </span>
       </div>
       <svg viewBox={`0 0 ${w} ${h}`} className="mt-2 w-full">
         <line x1={0} x2={w} y1={h / 2} y2={h / 2} stroke="#2a4a3b" />
         <polyline points={speeds.map((v, i) => `${x(i)},${ySpeed(v)}`).join(' ')} fill="none" stroke="#f5c84c" strokeWidth={2} opacity={0.8} />
-        {faces.map((v, i) => (
-          <circle key={i} cx={x(i)} cy={yFace(v)} r={3.5} fill="#eef2ea" />
+        {lines.map((v, i) => (
+          <circle key={i} cx={x(i)} cy={yLine(v)} r={3.5} fill="#eef2ea" />
         ))}
       </svg>
       <div className="mt-1 flex gap-4 text-xs text-fog">
-        <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-chalk" />Face angle (±3°)</span>
+        <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-chalk" />Start line vs your line (±3°, right is up)</span>
         <span className="flex items-center gap-1.5"><span className="h-1 w-3 rounded-full bg-flag" />Speed vs ideal (±20%)</span>
       </div>
+    </div>
+  );
+}
+
+/** Read · start line · pace: which part of the putt cost it. */
+function Diagnosis({ shot }: { shot: PuttingShotData }) {
+  const d = diagnose(shot);
+  return (
+    <div className="border-t border-line px-5 py-4">
+      <div className="text-sm font-semibold text-chalk">{d.headline}</div>
+      <div className="mt-2 grid grid-cols-3 gap-2">
+        <Part label="Read" p={d.read} />
+        <Part label="Start line" p={d.line} />
+        <Part label="Pace" p={d.pace} />
+      </div>
+      {shot.read && shot.read.verdict !== 'good' && (
+        <p className="mt-2 text-xs text-mist">
+          Your line at perfect pace would finish {Math.round(Math.abs(shot.read.missIn))} in {shot.read.missIn > 0 ? 'right' : 'left'} of the hole. The ideal line aims{' '}
+          {Math.abs(shot.read.idealIn) < 1 ? 'at the centre' : `${Math.abs(shot.read.idealIn) >= 12 ? `${(Math.abs(shot.read.idealIn) / 12).toFixed(1)} ft` : `${Math.round(Math.abs(shot.read.idealIn))} in`} ${shot.read.idealIn > 0 ? 'right' : 'left'}`}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function Part({ label, p }: { label: string; p: DiagPart }) {
+  const tone = p.state === 'good' ? 'text-birdie' : p.state === 'off' ? 'text-bogey' : 'text-fog';
+  return (
+    <div className="rounded-lg bg-club-950/60 px-2.5 py-2 ring-1 ring-line">
+      <div className="flex items-center gap-1 text-xs text-fog">
+        {p.state === 'good' ? <Check size={13} className="text-birdie" /> : p.state === 'off' ? <X size={13} className="text-bogey" /> : null}
+        {label}
+      </div>
+      <div className={`mt-0.5 text-sm font-semibold leading-tight ${tone}`}>{p.text}</div>
     </div>
   );
 }
