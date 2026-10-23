@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "eslint",
     "bridge": "node bridge/squareputt-bridge.mjs",
-    "check:physics": "npx tsx scripts/physics-check.ts"
+    "check:physics": "npx tsx scripts/physics-check.ts",
+    "check:real-greens": "npx tsx scripts/real-greens-check.ts"
   },
   "dependencies": {
     "canvas-confetti": "^1.9.4",

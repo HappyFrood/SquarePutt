@@ -4,7 +4,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import confetti from 'canvas-confetti';
 import { AppMode, ConnectionState, PuttingShotData, PuttLayout } from '@/lib/types';
 import { AppSettings, loadSettings, saveSettings } from '@/lib/settings';
-import { GreenSurface, readPutt } from '@/lib/green';
+import { GreenSurface, PuttingSurface, readPutt } from '@/lib/green';
+import { GreenLibrary, loadGreenLibrary, pickRealGreen, placeBallOnGreen, RealGreenSurface } from '@/lib/realGreens';
 import { PuttSetup, solveIdealStroke } from '@/lib/physicsEngine';
 import { openConnectService } from '@/lib/openConnectService';
 import { getStoredShots, saveShotToHistory, getDrillBests, updateDrillBests } from '@/lib/storage';
@@ -104,6 +105,14 @@ export default function App() {
   const [sState, setSState] = useState<ScrambleState | null>(null);
 
   const [conn, setConn] = useState<ConnectionState>(openConnectService.getState());
+  const [library, setLibrary] = useState<GreenLibrary | null>(null);
+  useEffect(() => {
+    let alive = true;
+    loadGreenLibrary().then((lib) => alive && setLibrary(lib));
+    return () => {
+      alive = false;
+    };
+  }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [connOpen, setConnOpen] = useState(false);
 
@@ -140,11 +149,19 @@ export default function App() {
   if (!busy && !sameLayout(layout, liveLayout)) setLayout(liveLayout);
 
   const stimp = settings.stimp;
-  const surface = useMemo(() => new GreenSurface(layout.difficulty, layout.seed, stimp), [layout.difficulty, layout.seed, stimp]);
-  const ball = useMemo(
-    () => layout.ball ?? ballFromLayout(layout.distanceFt, layout.angleRad),
-    [layout.ball, layout.distanceFt, layout.angleRad]
-  );
+  const useReal = settings.greenSource === 'real' && !!library && layout.difficulty !== 'flat';
+  const surface: PuttingSurface = useMemo(() => {
+    if (useReal && library && layout.difficulty !== 'flat') {
+      const real = pickRealGreen(library, layout.difficulty, layout.seed, stimp);
+      if (real) return real;
+    }
+    return new GreenSurface(layout.difficulty, layout.seed, stimp);
+  }, [useReal, library, layout.difficulty, layout.seed, stimp]);
+  const ball = useMemo(() => {
+    if (layout.ball) return layout.ball;
+    if (surface instanceof RealGreenSurface) return placeBallOnGreen(surface, layout.distanceFt, layout.angleRad);
+    return ballFromLayout(layout.distanceFt, layout.angleRad);
+  }, [surface, layout.ball, layout.distanceFt, layout.angleRad]);
   const setup: PuttSetup = useMemo(
     () => ({ surface, stimp, ball, holeRadiusMultiplier: layout.holeRadiusMultiplier, speedCalibration: settings.speedCalibration }),
     [surface, stimp, ball, layout.holeRadiusMultiplier, settings.speedCalibration]
@@ -346,9 +363,10 @@ export default function App() {
               markers={markers}
               outline={outline}
               resetKey={resetKey}
+              exaggeration={settings.slopeExaggeration}
               onRollComplete={onRollComplete}
             />
-            <ReadChip read={read} ideal={settings.readAssist === 'off' ? null : ideal} assist={settings.readAssist} stimp={stimp} />
+            <ReadChip read={read} ideal={settings.readAssist === 'off' ? null : ideal} assist={settings.readAssist} stimp={stimp} greenLabel={surface.label} rating={surface instanceof RealGreenSurface ? surface.difficulty : undefined} />
             <ResultBanner event={banner} />
             {waitingForSetup && !banner && (
               <div className="pointer-events-none absolute bottom-8 left-1/2 -translate-x-1/2 rounded-full bg-club-950/85 px-5 py-2 text-sm text-mist ring-1 ring-line">
@@ -374,7 +392,8 @@ export default function App() {
         mode={mode}
         settings={settings}
         onChange={patch}
-        onNewGreen={() => patch({ practiceSeed: Math.floor(Math.random() * 2 ** 31) })}
+        onNewGreen={() => patch({ practiceSeed: settings.practiceSeed + 1 })}
+        realGreensAvailable={!!library}
       />
       <ConnectionDrawer open={connOpen} onClose={() => setConnOpen(false)} state={conn} />
     </div>

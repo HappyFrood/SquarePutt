@@ -1,72 +1,104 @@
 # Product Specification: SquarePutt Web App
 
+*Revision 2 — October 2026. Changes from revision 1 are summarized in §8 and in CHANGELOG.md.*
+
 ## 1. Overview & Objective
-**SquarePutt** is a dedicated, web-based putting analysis and gamification application designed exclusively for users of the **Square Golf Launch Monitor (Home Edition)**. SquarePutt provides high-fidelity stroke analysis and gamified practice drills focused on dispersion tracking, bridging the gap left by basic simulator putting modes.
+**SquarePutt** is a dedicated, web-based putting analysis and gamification application designed for users of the **Square Golf Launch Monitor (Home Edition)**, and compatible with any launch monitor that supports the GSPro Open Connect protocol. SquarePutt provides high-fidelity stroke analysis and gamified practice drills focused on dispersion tracking, bridging the gap left by basic simulator putting modes.
 
 ## 2. Technical Architecture (Zero-Hardware-Code Approach)
-To eliminate friction and save development time, SquarePutt utilizes a decoupled architecture. **SquarePutt does not handle any direct Bluetooth (BLE) connections or hardware decoding.** 
+SquarePutt does not handle Bluetooth connections or hardware decoding.
 
-*   **The Interface & Physics Engine (Web App):** The main application (Next.js, React) hosted in the cloud. It connects via a local WebSocket (typically port 921) to receive live telemetry in the **Open Connect API** standard JSON format.
-    *   **Resource to Leverage:** We will fork and integrate the 3D physics and rendering engine from **`rroojrooj/Open-Birdie`** (an open-source Three.js simulator), granting us pre-calibrated terrain-aware roll physics without building from scratch.
-*   **The Data Bridge (Third-Party Connectors):** Because SquarePutt accepts standard Open Connect JSON, we do not need to build proprietary connection software. Users will utilize existing, free community connectors (e.g., OpenGolfSim's connector, GSPro connectors, or `allsquare` ports) that already know how to talk to the Square monitor and broadcast its data.
-*   **Data Sanitization:** We will implement a data filter inspired by the **`OpenSkyPlus`** framework to automatically discard phantom swings, misreads, or packets with low confidence scores before they impact a user's drill score.
+*   **The Interface & Physics Engine (Web App):** Next.js, React, Three.js and Tailwind CSS. Runs in the browser.
+    *   **Physics:** SquarePutt's own engine, based on published putting research (Penner 2002; Holmes 1991) and calibrated against measured launch-monitor putting data. *(Revision 1 planned to fork `rroojrooj/Open-Birdie`; this was not needed.)*
+*   **The Data Bridge:** Community connectors (the Square Golf software's GSPro integration, other GSPro Open Connect connectors) speak the GSPro Open Connect v1 protocol: they open a **TCP** connection to a GSPro server on `127.0.0.1:921`. A browser cannot accept TCP connections, so SquarePutt includes a small zero-dependency Node.js **bridge** (`npm run bridge`) that:
+    *   listens on TCP 921 and behaves like GSPro (acknowledges shots with code 200),
+    *   sends the "player information" message with a **putter** selected so the monitor switches to putting mode,
+    *   relays every message to the web app over a local WebSocket (`ws://127.0.0.1:9210`).
+    *   GSPro itself must be closed while the bridge runs.
+*   **Data Sanitization:** Inspired by **OpenSkyPlus**. Heartbeats and status messages are ignored. Phantom triggers (< 0.75 mph), non-putts (> 30 mph), launch angles outside −3° to 12°, low-confidence reads (< 35%) and duplicate packets (within 1.2 s) are discarded and reported briefly on screen. Putts arriving while a ball is still rolling are ignored. Field-name differences between connectors (e.g. `FaceToTarget` vs `FaceAngle`, `Loft` vs `DynamicLoft`) are normalized.
 
 ## 3. Virtual Green Environment & Physics
-To make drills realistic and test green-reading ability, the application will feature a dynamically generated 3D putting surface. 
 
-*   **Green Speed (Stimp):** Adjustable slider from **9.0 to 12.0**. This directly impacts the physics engine's friction coefficient.
-*   **Topography & Slopes:** The engine generates procedural meshes based on user-selected difficulty. 
+*   **Green Speed (Stimp):** Adjustable from **9.0 to 12.0**. Converted to rolling resistance from the Stimpmeter definition (ball released rolling at 1.83 m/s rolls *S* feet).
+*   **Physics model:**
+    *   **Skid phase:** sliding friction (μ = 0.2) until the ball reaches pure roll; with no launch spin it keeps 5/7 of its launch speed. Backspin/topspin from the monitor is used when provided.
+    *   **Roll phase:** constant rolling resistance; slope acceleration is 5/7 g·sin θ while rolling (full g while sliding).
+    *   **Cup capture:** the ball falls if it drops one ball radius while its centre crosses the hole — about 1.63 m/s maximum for a dead-centre entry, much less near the edge. Faster balls lip out with a deflection, or hop the cup.
+    *   **Calibration:** ~0.39 ft per mph² on a flat stimp-10 green, matching measured data. A user **ball speed calibration** (85–115%) adjusts for monitor differences.
+    *   **Ideal stroke solver:** for every putt, finds the start line and speed that roll through the centre of the cup and would stop ~17 in past. Used for aim guidance and for grading speed and start line.
+*   **Real greens (default):** 19 championship greens (Augusta National, Hazeltine National, Cog Hill, TPC Sawgrass, Pinehurst No. 2) built from OpenStreetMap green outlines and USGS 3DEP lidar elevation, each with up to 7 pin positions. Every pin is pre-rated Mild / Medium / Hard from the 90th-percentile slope within 7 m of the hole (thresholds 3.1% and 4.2%, splitting the 128 pins into thirds). The difficulty setting selects real pins of that rating; Flat uses a level generated green.
+*   **Topography & Slopes (generated greens):** Seeded, deterministic green surfaces built from real green features (gentle drainage tilt, crowns, bowls, double breaks, two-tier ridges, spines and swales, stretched secondary mounds, rolling undulation), so the fall direction changes across the green. Scaled so the steepest slope on the green (a strict maximum) falls in the selected range:
     *   **Flat (0°):** Completely level. Used for pure stroke mechanics.
-    *   **Mild (0° to 1°):** Gentle, subtle breaks.
-    *   **Medium (0° to 2°):** Standard course conditions requiring distinct aim points.
-    *   **Hard (0° to 3°):** Severe tournament-level undulations. 
-*   **Visual Feedback:** In Drill modes, the green contour is rendered using an augmented reality-style topography grid. A color-coded heatmap (Red for high, Blue for low) visualizes the slope and fall lines.
+    *   **Mild (0.6° to 1°):** Gentle, subtle breaks.
+    *   **Medium (1.3° to 2°):** Standard course conditions requiring distinct aim points.
+    *   **Hard (2.2° to 3°):** Severe undulations and tiers.
+    *   Slope at the hole is capped to a fair value for the green speed (about 3.5% at stimp 9 down to 2% at stimp 12).
+*   **Visual Feedback (all optional):** adjustable **height exaggeration** of the rendered green (default 3×, display only) so real-world slopes are visible on screen; Square-style **slope lines** (the 1 ft grid lines animate the left/right and up/down components of the slope separately, paced and coloured by steepness), a **1 ft grid** draped on the surface, **contour lines**, a **height map** (red high, blue low), the **line to the hole**, and the **ideal line**. A read panel states distance, uphill/downhill (inches), break direction and slope %, the aim point ("inside left edge", "1.5 cups right") and ideal ball speed. The level of help is selectable: none, read, or read + ideal line.
+*   **Playback:** putts roll in real time.
 
-## 4. Advanced Metrics 
-Using the baseline telemetry provided natively by the Square launch monitor (Ball Speed, HLA, Angle of Attack, Putter Path, Face Angle, Dynamic Loft), the app will synthesize additional pro-level metrics:
+## 4. Advanced Metrics
 
-*   **Skid vs. True Roll:** The app will calculate the estimated **Time to Zero Skid** using the Square's Ball Speed, Launch Angle, and the user's selected Stimp setting. 
-*   **Dynamic Loft Optimization:** The app will benchmark the user's Dynamic Loft and Angle of Attack against the ideal window (~1.5 degrees of launch) to ensure the ball is lifted out of its depression efficiently.
+*   **Skid vs. True Roll:** skid distance and time to pure roll from the physics simulation, plus total roll.
+*   **Dynamic Loft Optimization:** launch angle benchmarked against the 1.0–2.0° window, with a note when launch is too low (ball driven into turf) or too high (ball hops).
+*   **Versus the ideal stroke:** ball speed as % firm/soft, and start line in degrees left/right of the ideal line for that green.
 
 ## 5. Core Modes & Features
 
-### 5.1 Putting Stroke Analysis (Flat Green)
-This mode provides a sterile, data-first environment for dialing in the stroke mechanics using the Square's photometric tracking.
+### 5.1 Practice (Putting Stroke Analysis)
+Any distance (3–50 ft), any slope, new greens on demand.
 
 **Metrics Displayed:**
-*   **Ball Data:** Ball Speed, Launch Direction (HLA), Total Roll Distance.
-*   **Club Data:** Angle of Attack, Putter Path, Face Angle, Dynamic Loft.
+*   **Ball Data:** Ball Speed (vs ideal), Start Line / HLA (vs ideal), Roll Distance, Skid, Launch Angle.
+*   **Club Data:** Face Angle, Putter Path, Angle of Attack, Dynamic Loft.
 
 **UI/UX:**
-*   **Live Dashboard:** A visual representation of the putter face at impact and the path.
-*   **Trend Graphs:** Rolling averages of the last 10 putts to identify mechanical biases.
+*   **Impact diagram:** top-down putter face, path and start line (angles exaggerated 4× and labelled as such), with values below.
+*   **Trend:** face angle and pace over the last 10 putts, with face-angle spread graded.
+*   **Virtual putts:** simulated strokes (realistic, perfect, push, pull, firm, soft, custom) for use without a launch monitor.
 
 ### 5.2 Gamified Putting Drills
-This section focuses on skill acquisition, tracking dispersion metrics to generate a "Putting Handicap." All drills utilize a **Quintic-inspired color-coding system** to grade stroke consistency and variance:
+All drills use the **Quintic-inspired color-coding system**:
 *   **Blue (Eagle):** Elite consistency/variance (Tour level)
 *   **Green (Birdie):** Very Good
 *   **Amber (Par):** Average
 *   **Red (Bogey):** Poor/High variance
 
 #### A. Short Putts ("The Pressure Circle")
-*   **Goal:** Make-percentage and face control.
-*   **Distances:** 3ft, 5ft, 8ft.
-*   **Gamification:** "Survival Mode." The user must make consecutive putts. The target area shrinks visually based on the simulated hole size. 
-*   **Dispersion Metric:** Face Angle variance. The app tracks the standard deviation of the face angle across the session and grades the variance tier (Blue to Red).
+*   **Goal:** Make-percentage and face control under pressure, on putts that break.
+*   **Distances:** 3 ft, 5 ft, 8 ft, or a **3→8 ft ladder** (three makes in a row moves back one foot; a miss moves forward one foot).
+*   **Around the clock:** every putt comes from a different position around the hole, so each putt breaks differently and must be read (slope selectable; Mild by default).
+*   **Gamification:** "Survival Mode" with **1, 3 or 5 lives**. The cup shrinks with each consecutive make (4% per make, minimum 2.55″) and resets on a miss. Milestone celebrations at 5, 10, 15, 25 and 50 in a row. Personal best streak is saved.
+*   **Dispersion Metric:** Face Angle standard deviation across the session, graded Eagle–Bogey.
 
 #### B. Lag Putts ("Speed Control Zone")
 *   **Goal:** Distance control and ball speed consistency.
-*   **Distances:** 20ft, 30ft, 50ft.
-*   **Gamification:** "Bullseye." The user aims for a 3-foot radius circle behind the hole. Points are awarded for stopping the ball within the "safe zone"; points are deducted for leaving it short.
-*   **Dispersion Metric:** Front-to-back distance dispersion. The app tracks Ball Speed variance and translates it to distance variance based on green speed.
+*   **Distances:** 20 ft, 30 ft, 50 ft, or **mixed 20–50 ft** (default; varied practice transfers better than repeating one length). Ball positions vary around the hole.
+*   **Gamification:** "Bullseye" sets of 10 or 15 putts. The 3 ft zone is drawn on the green and every finish in the set stays marked.
+    *   Holed +5; past the hole within 3 ft +3; within 3 ft but short +1; 3–6 ft long 0; short (outside 3 ft) or more than 6 ft long −1.
+    *   Combo: the third consecutive zone finish, and each one after, earns +1.
+    *   High score is saved; each set is graded.
+*   **Dispersion Metric:** Front-to-back distance standard deviation (ft), graded.
 
 #### C. Random Putts ("The Scramble")
-*   **Goal:** Adaptability and reading feel.
-*   **Mechanics:** Distances are randomized between 6ft and 40ft on every shot. The **slope is also randomized** based on the chosen difficulty (Mild, Medium, Hard). 
-*   **Gamification:** "The Gauntlet." The user has one attempt to get it inside a dynamic "gimme" circle (gimme radius increases with the length of the putt). 
-*   **Dispersion Metric:** Overall circular error probable (CEP) and Strokes Gained: Putting.
+*   **Goal:** Adaptability, green reading and feel.
+*   **Mechanics:** A **9- or 18-hole putting round**. Each hole is a new green with a random distance (6–40 ft, weighted toward makeable lengths), direction and slope (Mild, Medium, Hard, or mixed).
+*   **Gamification:** "The Gauntlet". You **putt out** from where the ball stops; finishing inside the dynamic **gimme circle** (1.5–3.8 ft, grows with putt length) is given. Par is two putts per hole; score to par and a scorecard are shown; maximum six putts per hole.
+*   **Dispersion Metric:** Strokes Gained: Putting per hole against the PGA Tour baseline (Broadie, interpolated by distance), total and per 18 holes (graded); first-putt proximity (CEP 50%); one-putts and three-putts.
 
 ## 6. Session Tracking & Analytics
-*   **User Profiles:** Save historical data in a cloud database (e.g., PostgreSQL on Railway).
-*   **Dispersion Heatmaps:** Visual scatter plots of where the ball ends up relative to the target, color-coded by drill type.
-*   **Bag Mapping (Putter):** Identify the user's "Make %" at every distance interval to highlight specific weaknesses.
+*   **Storage:** Local to the browser — settings, the last 1,000 putts and personal bests — with JSON export/import. *(Cloud profiles, e.g. PostgreSQL on Railway, remain planned.)*
+*   **Dispersion:** Scatter of where missed putts finish relative to the hole (in each putt's own direction), with bias and spread, filterable by distance band.
+*   **Bag Mapping (Putter):** Make % in distance buckets (3 ft to 40 ft+) compared with the approximate PGA Tour make %.
+*   **Summary:** make %, average pace vs ideal, start-line bias, average leave on misses, personal bests.
+
+## 7. Audio & Display
+*   **Display:** dark kiosk interface built to be read from the putting mat, full-screen toggle, settings and launch monitor setup in slide-out panels.
+*   **Audio:** synthesized putter strike, lip-out, and a physically modelled **cup drop** (fall and decaying rebounds in a plastic cup, varied each time). A recording at `public/sounds/cup-drop.mp3` overrides the synthesized cup drop.
+
+## 8. Changes from Revision 1
+*   Connection: browser now receives shots through the included bridge; direct `ws://127.0.0.1:921` was not compatible with GSPro Open Connect connectors (TCP clients).
+*   Physics: rebuilt (rolling resistance from stimp was ~3.5× too high; capture speed did not depend on entry position). Open-Birdie fork dropped.
+*   Greens: replaced a tilted plane with procedural contoured greens; slope ranges per difficulty made explicit; hole slope capped by stimp.
+*   Drills: Pressure Circle adds around-the-clock positions, lives and a ladder; Speed Control adds mixed distances, sets, combos and a short-inside-3-ft category; The Scramble now plays holes out with strokes gained per hole.
+*   Metrics: speed and start line graded against the ideal stroke for that putt (needed on breaking putts); Strokes Gained table interpolated instead of stepped.
+*   UI: redesigned; Tailwind CSS installed (styles were previously not applied).

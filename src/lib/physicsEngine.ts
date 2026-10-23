@@ -20,7 +20,7 @@
  * ft per mph^2 for stimp 10-11, matching measured launch-monitor putting data (~0.37).
  */
 
-import { GreenSurface, Vec2 } from './green';
+import { PuttingSurface, Vec2 } from './green';
 
 export const GRAVITY = 9.80665;
 export const BALL_RADIUS_M = 0.021335;
@@ -57,7 +57,7 @@ export function speedForFlatDistanceMph(distanceFt: number, stimp: number): numb
 }
 
 export interface PuttSetup {
-  surface: GreenSurface;
+  surface: PuttingSurface;
   stimp: number;
   /** Ball position; the hole is at the origin. */
   ball: Vec2;

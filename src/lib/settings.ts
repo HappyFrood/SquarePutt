@@ -14,6 +14,10 @@ export interface AppSettings {
   readAssist: ReadAssist;
   /** Multiplier on measured ball speed, for launch monitor calibration. */
   speedCalibration: number;
+  /** On-screen height exaggeration of the green (display only). */
+  slopeExaggeration: number;
+  /** Real lidar-surveyed championship greens, or generated greens. */
+  greenSource: 'real' | 'generated';
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -29,6 +33,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   aimLine: true,
   readAssist: 'read',
   speedCalibration: 1,
+  slopeExaggeration: 3,
+  greenSource: 'real',
 };
 
 const KEY = 'squareputt_settings_v2';

@@ -8,7 +8,21 @@ import { openConnectService } from '@/lib/openConnectService';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 
 /** Top-left: what this putt looks like, as a caddie would say it. */
-export function ReadChip({ read, ideal, assist, stimp }: { read: PuttRead; ideal: IdealStroke | null; assist: 'off' | 'read' | 'line'; stimp: number }) {
+export function ReadChip({
+  read,
+  ideal,
+  assist,
+  stimp,
+  greenLabel,
+  rating,
+}: {
+  read: PuttRead;
+  ideal: IdealStroke | null;
+  assist: 'off' | 'read' | 'line';
+  stimp: number;
+  greenLabel?: string;
+  rating?: string;
+}) {
   const off = ideal ? Math.abs(ideal.aimOffsetIn) : 0;
   const side = ideal && ideal.aimOffsetIn > 0 ? 'right' : 'left';
   const aim =
@@ -21,6 +35,12 @@ export function ReadChip({ read, ideal, assist, stimp }: { read: PuttRead; ideal
       : `Aim ${(off / 4.25).toFixed(1)} cups ${side}`;
   return (
     <div className="pointer-events-none absolute left-4 top-4 z-10 max-w-sm rounded-2xl bg-club-950/80 px-4 py-3 ring-1 ring-line backdrop-blur">
+      {greenLabel && (
+        <p className="mb-1.5 text-xs font-medium text-mist">
+          {greenLabel}
+          {rating && <span className="text-fog"> · {rating} pin</span>}
+        </p>
+      )}
       <div className="flex items-baseline gap-3">
         <span className="num text-4xl font-semibold leading-none">{read.distanceFt.toFixed(read.distanceFt < 10 ? 1 : 0)}</span>
         <span className="text-sm text-mist">ft · stimp {stimp.toFixed(1)}</span>

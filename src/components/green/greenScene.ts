@@ -11,7 +11,7 @@ import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { Line2 } from 'three/examples/jsm/lines/Line2.js';
 import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
-import { GreenSurface, Vec2, mulberry32 } from '@/lib/green';
+import { GreenSurface, PuttingSurface, Vec2, mulberry32 } from '@/lib/green';
 import { BALL_RADIUS_M, HOLE_RADIUS_M } from '@/lib/physicsEngine';
 import { CameraMode } from '@/lib/types';
 
@@ -51,6 +51,16 @@ const FADE_START = 21; // m, terrain contours fade to flat beyond this radius
 const FADE_END = 30;
 
 const toThree = (x: number, y: number, z: number) => new THREE.Vector3(x, y, -z);
+
+function insidePoly(x: number, z: number, poly: Vec2[]) {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    if (a.z > z !== b.z > z && x < ((b.x - a.x) * (z - a.z)) / (b.z - a.z) + a.x) inside = !inside;
+  }
+  return inside;
+}
 
 function grainTexture(): THREE.CanvasTexture {
   const size = 256;
@@ -124,7 +134,7 @@ export class GreenScene {
   private cb: SceneCallbacks = {};
 
   // state
-  private surface: GreenSurface = new GreenSurface('flat', 1, 10);
+  private surface: PuttingSurface = new GreenSurface('flat', 1, 10);
   private ball: Vec2 = { x: 0, z: -3 };
   private holeMult = 1;
   private overlays: SceneOverlays = { grid: true, contours: false, heatmap: false, fallLines: true, aimLine: true };
@@ -135,6 +145,8 @@ export class GreenScene {
   private terrainMat!: THREE.MeshStandardMaterial;
   private terrainUniforms = {
     uGrid: { value: 1 },
+    uFlow: { value: 1 },
+    uTime: { value: 0 },
     uContours: { value: 0 },
     uHeat: { value: 0 },
     uMinH: { value: 0 },
@@ -144,6 +156,10 @@ export class GreenScene {
     uGreenU: { value: new THREE.Vector2(0, 1) },
     uGreenR: { value: new THREE.Vector2(8, 6) },
     uWobble: { value: new THREE.Vector4(0, 0, 0.06, 0.04) },
+    uUseMask: { value: 0 },
+    uMask: { value: null as THREE.Texture | null },
+    uMaskMin: { value: new THREE.Vector2() },
+    uMaskSize: { value: 1 },
     uGreenCol: { value: new THREE.Color('#5d9a3e') },
     uCollarCol: { value: new THREE.Color('#477f30') },
     uRoughCol: { value: new THREE.Color('#2f5a25') },
@@ -159,11 +175,12 @@ export class GreenScene {
   private markerGroup = new THREE.Group();
   private trail: Line2 | null = null;
   private idealLine: Line2 | null = null;
-  private beads: THREE.InstancedMesh | null = null;
-  private beadState: { x: number; z: number; life: number; max: number }[] = [];
   private lineMats: LineMaterial[] = [];
   private sun!: THREE.DirectionalLight;
   private terrainKey = '';
+  /** Vertical exaggeration for display only; physics always uses true heights. */
+  private exag = 3;
+  private lastOutline: { anchor?: Vec2; radiusM?: number } = {};
 
   // playback
   private traj: [number, number, number][] | null = null;
@@ -233,12 +250,12 @@ export class GreenScene {
     u['rayleigh'].value = 1.6;
     u['mieCoefficient'].value = 0.004;
     u['mieDirectionalG'].value = 0.8;
-    const sunDir = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(55), THREE.MathUtils.degToRad(200));
+    const sunDir = new THREE.Vector3().setFromSphericalCoords(1, THREE.MathUtils.degToRad(64), THREE.MathUtils.degToRad(235));
     u['sunPosition'].value.copy(sunDir);
     s.add(sky);
 
-    s.add(new THREE.HemisphereLight('#dbeafe', '#3b5d2a', 1.15));
-    const sun = new THREE.DirectionalLight('#fff4e0', 2.1);
+    s.add(new THREE.HemisphereLight('#dbeafe', '#3b5d2a', 0.75));
+    const sun = new THREE.DirectionalLight('#fff4e0', 2.7);
     sun.position.copy(sunDir.clone().multiplyScalar(40));
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
@@ -282,18 +299,37 @@ export class GreenScene {
     this.terrainMat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, this.terrainUniforms);
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vSpWorld;')
-        .replace('#include <project_vertex>', '#include <project_vertex>\nvSpWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+        .replace('#include <common>', '#include <common>\nvarying vec3 vSpWorld;\nattribute vec2 aGrad;\nvarying vec2 vGrad;')
+        .replace('#include <project_vertex>', '#include <project_vertex>\nvSpWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvGrad = aGrad;');
       shader.fragmentShader = shader.fragmentShader
         .replace(
           '#include <common>',
           `#include <common>
 varying vec3 vSpWorld;
-uniform float uGrid, uContours, uHeat, uMinH, uMaxH, uContourStep;
+varying vec2 vGrad;
+uniform float uGrid, uFlow, uTime, uContours, uHeat, uMinH, uMaxH, uContourStep;
 uniform vec2 uGreenC, uGreenU, uGreenR;
 uniform vec4 uWobble;
+uniform float uUseMask, uMaskSize;
+uniform sampler2D uMask;
+uniform vec2 uMaskMin;
 uniform vec3 uGreenCol, uCollarCol, uRoughCol;
 float spLine(float v) { float d = fwidth(v); return 1.0 - clamp(abs(fract(v - 0.5) - 0.5) / max(d, 1e-5), 0.0, 1.0); }
+float spLineW(float v, float w) { float d = fwidth(v) * w; return 1.0 - clamp(abs(fract(v - 0.5) - 0.5) / max(d, 1e-5), 0.0, 1.0); }
+// Dashes running along a grid line in the downhill direction of that axis' slope component c.
+float spFlow(float s, float c) {
+  float m = abs(c);
+  if (m < 0.0015) return 0.0;
+  float speed = clamp(m * 45.0, 0.12, 2.5);
+  float t = fract(sign(c) * s / 0.6096 - uTime * speed);
+  float head = smoothstep(0.25, 0.95, t) * (1.0 - smoothstep(0.95, 1.0, t));
+  return head * clamp(m / 0.008, 0.35, 1.0);
+}
+vec3 spSlopeCol(float m) {
+  float pct = m * 100.0;
+  vec3 lo = vec3(0.45, 0.85, 1.0), mid = vec3(1.0, 0.86, 0.3), hi = vec3(1.0, 0.36, 0.25);
+  return pct < 2.0 ? mix(lo, mid, smoothstep(0.5, 2.0, pct)) : mix(mid, hi, smoothstep(2.0, 3.2, pct));
+}
 vec3 spRamp(float t) {
   vec3 c0 = vec3(0.12, 0.30, 0.95), c1 = vec3(0.10, 0.75, 0.90), c2 = vec3(0.30, 0.85, 0.35), c3 = vec3(0.98, 0.85, 0.20), c4 = vec3(0.95, 0.25, 0.15);
   t = clamp(t, 0.0, 1.0) * 4.0;
@@ -315,6 +351,12 @@ vec3 spRamp(float t) {
   float r = length(q) * (1.0 + uWobble.z * sin(3.0 * ang + uWobble.x) + uWobble.w * sin(5.0 * ang + uWobble.y));
   float gAmt = 1.0 - smoothstep(0.985, 1.0, r);
   float cAmt = 1.0 - smoothstep(1.075, 1.09, r);
+  if (uUseMask > 0.5) {
+    // real green: signed distance to the surveyed outline (metres, + outside)
+    float sd = (texture2D(uMask, (p - uMaskMin) / uMaskSize).r * 255.0 - 128.0) / 20.0;
+    gAmt = 1.0 - smoothstep(-0.05, 0.05, sd);
+    cAmt = 1.0 - smoothstep(0.85, 1.0, sd);
+  }
   vec3 base = mix(uRoughCol, uCollarCol, cAmt);
   base = mix(base, uGreenCol, gAmt);
   // mowing stripes on the green and collar
@@ -335,6 +377,16 @@ vec3 spRamp(float t) {
   if (uGrid > 0.5) {
     float g = max(spLine(p.x / 0.3048), spLine(p.y / 0.3048));
     diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.92, 1.0, 0.95), g * 0.22 * gAmt);
+  }
+  if (uFlow > 0.5) {
+    // Square-style slope lines: lines running along X carry the X part of the slope,
+    // lines running along Z carry the Z part. Brighter, faster and warmer = steeper.
+    float lineAlongX = spLineW(p.y / 0.3048, 1.8);
+    float lineAlongZ = spLineW(p.x / 0.3048, 1.8);
+    float cx = -vGrad.x;
+    float cz = -vGrad.y;
+    diffuseColor.rgb = mix(diffuseColor.rgb, spSlopeCol(abs(cx)), lineAlongX * spFlow(p.x, cx) * gAmt);
+    diffuseColor.rgb = mix(diffuseColor.rgb, spSlopeCol(abs(cz)), lineAlongZ * spFlow(p.y, cz) * gAmt);
   }
 }`
         );
@@ -385,15 +437,33 @@ vec3 spRamp(float t) {
     return l;
   }
 
+  /** Displayed (exaggerated) surface height. */
+  private hh(x: number, z: number) {
+    return this.surface.height(x, z) * this.exag;
+  }
+
   private drape(x: number, z: number, lift = 0.003) {
-    return toThree(x, this.surface.height(x, z) + lift, z);
+    return toThree(x, this.hh(x, z) + lift, z);
+  }
+
+  /** Maps a physics sample (true height) onto the displayed surface, keeping any drop below it. */
+  private displayY(x: number, y: number, z: number) {
+    return this.hh(x, z) + (y - this.surface.height(x, z));
+  }
+
+  setExaggeration(e: number) {
+    if (e === this.exag) return;
+    this.exag = e;
+    this.terrainKey = '';
+    this.setGreen(this.surface, this.ball, this.holeMult, this.lastOutline);
   }
 
   /* ------------------------------ public setters ------------------------------ */
 
-  setGreen(surface: GreenSurface, ball: Vec2, holeMult: number, outline: { anchor?: Vec2; radiusM?: number } = {}) {
+  setGreen(surface: PuttingSurface, ball: Vec2, holeMult: number, outline: { anchor?: Vec2; radiusM?: number } = {}) {
     const anchor = outline.anchor ?? ball;
-    const key = `${surface.difficulty}|${surface.seed}|${surface.stimp}|${anchor.x.toFixed(3)}|${anchor.z.toFixed(3)}|${outline.radiusM ?? 0}`;
+    this.lastOutline = outline;
+    const key = `${this.exag}|${surface.label ?? ''}|${surface.difficulty}|${surface.seed}|${surface.stimp}|${anchor.x.toFixed(3)}|${anchor.z.toFixed(3)}|${outline.radiusM ?? 0}`;
     this.surface = surface;
     this.ball = { ...ball };
     this.holeMult = holeMult;
@@ -404,7 +474,7 @@ vec3 spRamp(float t) {
     }
     this.rebuildCup();
     this.rebuildOverlays();
-    this.placeBall(ball.x, surface.height(ball.x, ball.z), ball.z, null);
+    this.placeBall(ball.x, this.hh(ball.x, ball.z), ball.z, null);
     this.updatePinVisibility();
     this.resetBeads();
   }
@@ -434,7 +504,7 @@ vec3 spRamp(float t) {
     this.idealLine = null;
     if (!samples || samples.length < 2) return;
     const pts: THREE.Vector3[] = [];
-    for (let i = 0; i < samples.length; i += 2) pts.push(toThree(samples[i][0], samples[i][1] + 0.004, samples[i][2]));
+    for (let i = 0; i < samples.length; i += 2) pts.push(toThree(samples[i][0], this.displayY(samples[i][0], samples[i][1], samples[i][2]) + 0.004, samples[i][2]));
     this.idealLine = this.fat(pts, '#fde047', 3, 0.9);
     this.overlayGroup.add(this.idealLine);
   }
@@ -511,7 +581,7 @@ vec3 spRamp(float t) {
       this.overlayGroup.remove(this.trail);
       this.trail.geometry.dispose();
     }
-    const pts = samples.map((s) => toThree(s[0], s[1] + 0.003, s[2]));
+    const pts = samples.map((s) => toThree(s[0], this.displayY(s[0], s[1], s[2]) + 0.003, s[2]));
     if (pts.length < 2) pts.push(pts[0].clone());
     this.trail = this.fat(pts, '#ffffff', 2.5, 0.75);
     (this.trail.geometry as LineGeometry).instanceCount = 0;
@@ -537,15 +607,58 @@ vec3 spRamp(float t) {
 
   /* --------------------------------- rebuilds --------------------------------- */
 
+  /** Real greens: bake the outline into a signed-distance texture for the terrain shader. */
+  private buildOutlineMask() {
+    const U = this.terrainUniforms;
+    U.uMask.value?.dispose();
+    U.uMask.value = null;
+    U.uUseMask.value = 0;
+    const poly = this.surface.outline;
+    if (!poly || poly.length < 3) return;
+    const half = 30;
+    const n = 240; // 0.25 m texels
+    const data = new Uint8Array(n * n);
+    const step = (2 * half) / n;
+    for (let j = 0; j < n; j++) {
+      for (let i = 0; i < n; i++) {
+        // texel centre in Three coords (X, Z) -> physics (x, z) = (X, -Z)
+        const X = -half + (i + 0.5) * step;
+        const Z = -half + (j + 0.5) * step;
+        const x = X;
+        const z = -Z;
+        let d2 = Infinity;
+        for (let k = 0, m = poly.length - 1; k < poly.length; m = k++) {
+          const ax = poly[m].x, az = poly[m].z, bx = poly[k].x, bz = poly[k].z;
+          const ex = bx - ax, ez = bz - az;
+          const t = Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / (ex * ex + ez * ez || 1)));
+          const dx = x - (ax + ex * t), dz = z - (az + ez * t);
+          d2 = Math.min(d2, dx * dx + dz * dz);
+        }
+        const sd = Math.sqrt(d2) * (insidePoly(x, z, poly) ? -1 : 1);
+        data[j * n + i] = Math.max(0, Math.min(255, Math.round(128 + sd * 20)));
+      }
+    }
+    const tex = new THREE.DataTexture(data, n, n, THREE.RedFormat, THREE.UnsignedByteType);
+    tex.magFilter = THREE.LinearFilter;
+    tex.minFilter = THREE.LinearFilter;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.needsUpdate = true;
+    U.uMask.value = tex;
+    U.uMaskMin.value.set(-half, -half);
+    U.uMaskSize.value = 2 * half;
+    U.uUseMask.value = 1;
+  }
+
   /** Return the ball to its starting spot after a putt, keeping the trail visible. */
   resetBall() {
     this.playing = false;
     this.traj = null;
-    this.placeBall(this.ball.x, this.surface.height(this.ball.x, this.ball.z), this.ball.z, null);
+    this.placeBall(this.ball.x, this.hh(this.ball.x, this.ball.z), this.ball.z, null);
   }
 
   private rebuildTerrain(anchor: Vec2, radiusM?: number) {
     const pos = this.terrain.geometry.attributes.position as THREE.BufferAttribute;
+    const grad = new Float32Array(pos.count * 2);
     for (let i = 0; i < pos.count; i++) {
       const X = pos.getX(i);
       const Z = pos.getZ(i);
@@ -554,9 +667,13 @@ vec3 spRamp(float t) {
       const r = Math.hypot(x, z);
       const fade = r <= FADE_START ? 1 : r >= FADE_END ? 0 : 1 - (r - FADE_START) / (FADE_END - FADE_START);
       const f = fade * fade * (3 - 2 * fade);
-      pos.setY(i, this.surface.height(x, z) * f);
+      pos.setY(i, this.hh(x, z) * f);
+      const g = this.surface.gradient(x, z);
+      grad[i * 2] = g.dhdx * f; // dh/dX
+      grad[i * 2 + 1] = -g.dhdz * f; // dh/dZ (Three's Z = -physics z)
     }
     pos.needsUpdate = true;
+    this.terrain.geometry.setAttribute('aGrad', new THREE.BufferAttribute(grad, 2));
     this.terrain.geometry.computeVertexNormals();
     this.terrain.geometry.computeBoundingSphere();
 
@@ -577,15 +694,18 @@ vec3 spRamp(float t) {
     else U.uGreenR.value.set(Math.max(7.5, d * 0.58 + 5.5), Math.max(6.5, 5 + d * 0.15));
     U.uWobble.value.set(rnd() * 6.28, rnd() * 6.28, 0.05 + rnd() * 0.04, 0.02 + rnd() * 0.03);
 
+    this.buildOutlineMask();
+
     // Heatmap range from the green area
+    const outline = this.surface.outline;
     let lo = Infinity;
     let hi = -Infinity;
     for (let x = -16; x <= 16; x += 0.5) {
       for (let z = -16; z <= 16; z += 0.5) {
         const dx = x - cx;
         const dz = z - cz;
-        if (dx * dx + dz * dz > Math.min(16, Math.max(U.uGreenR.value.x, U.uGreenR.value.y)) ** 2) continue;
-        const h = this.surface.height(x, z);
+        if (outline ? !insidePoly(x, z, outline) : dx * dx + dz * dz > Math.min(16, Math.max(U.uGreenR.value.x, U.uGreenR.value.y)) ** 2) continue;
+        const h = this.hh(x, z);
         lo = Math.min(lo, h);
         hi = Math.max(hi, h);
       }
@@ -599,7 +719,7 @@ vec3 spRamp(float t) {
     U.uContourStep.value = Math.min(0.05, Math.max(0.0127, (hi - lo) / 20));
 
     this.sun.target.position.copy(toThree(cx, 0, cz));
-    this.sun.position.copy(this.sun.target.position).add(new THREE.Vector3().setFromSphericalCoords(40, THREE.MathUtils.degToRad(55), THREE.MathUtils.degToRad(200)));
+    this.sun.position.copy(this.sun.target.position).add(new THREE.Vector3().setFromSphericalCoords(40, THREE.MathUtils.degToRad(64), THREE.MathUtils.degToRad(235)));
   }
 
   private rebuildCup() {
@@ -607,9 +727,9 @@ vec3 spRamp(float t) {
     this.cup.clear();
     const R = HOLE_RADIUS_M * this.holeMult;
     const g = this.surface.gradient(0, 0);
-    const normal = new THREE.Vector3(-g.dhdx, 1, g.dhdz).normalize();
+    const normal = new THREE.Vector3(-g.dhdx * this.exag, 1, g.dhdz * this.exag).normalize();
     const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
-    const y = this.surface.height(0, 0);
+    const y = this.hh(0, 0);
 
     const mk = (geo: THREE.BufferGeometry, color: string, lift: number) => {
       const m = new THREE.Mesh(geo.rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
@@ -649,42 +769,7 @@ vec3 spRamp(float t) {
   }
 
   private resetBeads() {
-    if (this.beads) {
-      this.scene.remove(this.beads);
-      this.beads.geometry.dispose();
-      (this.beads.material as THREE.Material).dispose();
-      this.beads = null;
-    }
-    this.beadState = [];
-    if (!this.overlays.fallLines || this.surface.difficulty === 'flat') return;
-    const count = 220;
-    this.beads = new THREE.InstancedMesh(
-      new THREE.SphereGeometry(0.011, 8, 6),
-      new THREE.MeshBasicMaterial({ color: '#e0f2fe' }),
-      count
-    );
-    this.beads.frustumCulled = false;
-    for (let i = 0; i < count; i++) {
-      const b = { x: 0, z: 0, life: 0, max: 1 };
-      this.spawnBead(b);
-      b.life = Math.random() * b.max;
-      this.beadState.push(b);
-    }
-    this.scene.add(this.beads);
-  }
-
-  private spawnBead(b: { x: number; z: number; life: number; max: number }) {
-    // anywhere along the corridor between ball and hole, a bit wider than the putt
-    const t = Math.random() * 1.25 - 0.1;
-    const d = Math.hypot(this.ball.x, this.ball.z) || 1;
-    const w = Math.max(1.2, d * 0.35);
-    const side = (Math.random() - 0.5) * 2 * w;
-    const fx = -this.ball.x / d;
-    const fz = -this.ball.z / d;
-    b.x = this.ball.x + fx * d * t + fz * side;
-    b.z = this.ball.z + fz * d * t - fx * side;
-    b.life = 0;
-    b.max = 1.6 + Math.random() * 1.6;
+    this.terrainUniforms.uFlow.value = this.overlays.fallLines && this.surface.difficulty !== 'flat' ? 1 : 0;
   }
 
   /* ---------------------------------- frame ---------------------------------- */
@@ -698,7 +783,7 @@ vec3 spRamp(float t) {
       this.ballMesh.quaternion.copy(this.ballQuat);
     }
     this.ballMesh.position.copy(p);
-    const surfaceY = this.surface.height(x, z);
+    const surfaceY = this.hh(x, z);
     const below = y < surfaceY - 0.004;
     this.ballShadow.visible = !below;
     this.ballShadow.position.set(p.x, surfaceY + 0.0012, p.z);
@@ -743,7 +828,7 @@ vec3 spRamp(float t) {
       const pf = pfi - pi;
       const px = pa[0] + (pb[0] - pa[0]) * pf;
       const pz = pa[2] + (pb[2] - pa[2]) * pf;
-      this.placeBall(x, y, z, new THREE.Vector3(x - px, 0, -(z - pz)));
+      this.placeBall(x, this.displayY(x, y, z), z, new THREE.Vector3(x - px, 0, -(z - pz)));
       if (this.trail) (this.trail.geometry as LineGeometry).instanceCount = Math.max(0, Math.min(i, this.dropIndex >= 0 ? this.dropIndex : n));
       if (this.dropIndex >= 0 && !this.dropFired && i >= this.dropIndex) {
         this.dropFired = true;
@@ -770,25 +855,7 @@ vec3 spRamp(float t) {
       pos.needsUpdate = true;
     }
 
-    // Fall-line beads
-    if (this.beads) {
-      const m = new THREE.Matrix4();
-      for (let k = 0; k < this.beadState.length; k++) {
-        const b = this.beadState[k];
-        const g = this.surface.gradient(b.x, b.z);
-        const sp = 9 * Math.hypot(g.dhdx, g.dhdz);
-        const gl = Math.hypot(g.dhdx, g.dhdz) || 1;
-        b.x -= (g.dhdx / gl) * sp * dt;
-        b.z -= (g.dhdz / gl) * sp * dt;
-        b.life += dt;
-        if (b.life > b.max) this.spawnBead(b);
-        const fade = Math.sin(Math.PI * Math.min(1, b.life / b.max));
-        const p = this.drape(b.x, b.z, 0.008);
-        m.makeScale(fade, fade, fade).setPosition(p);
-        this.beads.setMatrixAt(k, m);
-      }
-      this.beads.instanceMatrix.needsUpdate = true;
-    }
+    this.terrainUniforms.uTime.value = now / 1000;
 
     this.updateCamera(dt);
     this.renderer.render(this.scene, this.camera);
@@ -797,7 +864,7 @@ vec3 spRamp(float t) {
 
   private updateCamera(dt: number) {
     const ball = this.ballMesh.position;
-    const hole = toThree(0, this.surface.height(0, 0), 0);
+    const hole = toThree(0, this.hh(0, 0), 0);
     const toHole = hole.clone().sub(ball).setY(0);
     const dist = Math.max(0.6, toHole.length());
     const dir = toHole.clone().normalize();
@@ -828,7 +895,7 @@ vec3 spRamp(float t) {
       }
       default: {
         // Behind the ball, roughly at a reading crouch for short putts, standing for long.
-        const startBall = toThree(this.ball.x, this.surface.height(this.ball.x, this.ball.z), this.ball.z);
+        const startBall = toThree(this.ball.x, this.hh(this.ball.x, this.ball.z), this.ball.z);
         const sdir = hole.clone().sub(startBall).setY(0).normalize();
         const sdist = Math.max(0.6, hole.clone().sub(startBall).setY(0).length());
         const back = 1.1 + sdist * 0.12;

@@ -1,164 +1,191 @@
-# SquarePutt ⛳
+# SquarePutt
 
-**SquarePutt** is a dedicated, high-fidelity web-based putting analysis, simulation, and drill gamification application engineered specifically for golfers using the **Square Golf Launch Monitor (Home Edition)**, as well as any launch monitor supporting the **Open Connect API** standard (GSPro connectors, OpenGolfSim, OpenFlight, allsquare).
+Putting practice, stroke analysis and drills for the **Square Golf launch monitor** (Home Edition), and any launch monitor that speaks the **GSPro Open Connect** protocol.
 
-Built with **Next.js (App Router)**, **TypeScript**, **Three.js**, and **Vanilla CSS**, SquarePutt delivers tour-caliber biomechanical stroke telemetry, calibrated terrain-aware roll physics, and an immersive 3D championship green optimized for full-screen single-monitor simulator bays.
+You putt on your real mat; SquarePutt rolls the ball on a virtual green with realistic speed, slope and cup physics, shows what your stroke did, and turns practice into scored drills.
 
----
-
-## 🌟 What Sets SquarePutt Apart
-
-### 1. Hands-Free Full-Screen Kiosk Experience
-* **Designed for the Putting Mat:** Built specifically for single-monitor or projector simulator setups where the golfer steps away to putt.
-* **Zero Annoyances:** Strictly **no voice callouts, no countdown timers, and no forced button clicks** between putts. The launch monitor automatically detects when you strike a ball, and SquarePutt immediately runs the simulation and logs the shot.
-* **Clean Kiosk HUD:** Distraction-free high-visibility telemetry overlay showing face angle, ball speed, club path, face-to-path delta, and target distance.
-* **Modal Settings:** Green speed (Stimp), break undulation, target distance, camera perspectives, and display overlays are configured cleanly in the `⚙️ Settings` dialog, keeping the main viewport 100% clutter-free.
+Built with Next.js (App Router), TypeScript, Three.js and Tailwind CSS. Runs in the browser; a tiny local bridge connects your launch monitor.
 
 ---
 
-### 2. High-Fidelity Three.js 3D Graphics Engine
-* **Physical Analytical Atmospheric Sky:** Powered by Three.js's physical Rayleigh and Mie scattering analytical `Sky` shader (`three/examples/jsm/objects/Sky.js`) with realistic sun disk bloom, atmospheric haze, and zero empty black void above the horizon.
-* **360° Panoramic Horizon & Meadow:** Expansive distant golf course pine and oak tree line with rolling hill ridges and outer rough meadow.
-* **USGA Regulation 3D Cup:**
-  * Concave hole depressed directly into the 3D green mesh geometry.
-  * 1.5-inch white molded plastic cup liner (`#f8fafc`) with beveled upper lip.
-  * Sheared turf collar cut contour.
-  * Deep dark lower cup cavity down to USGA 4-inch depth (10.16 cm).
-  * Perforated cast drainage bottom plate with radial slots.
-  * Central polished brass ferrule flagstick socket (`#d97706`).
-  * Soft interior cup accent light.
-* **PGA Tour Striped Flagstick:**
-  * Regulation 7.5-foot tournament pin with 14 alternating high-contrast yellow (`#f59e0b`) and carbon black (`#18181b`) barber-pole bands.
-  * Solid polished brass spherical finial cap at top and brass ferrule sleeve at base.
-  * Double-sided cloth pennant flag with continuous multi-harmonic wind flutter dynamics.
-* **Championship Mowed Turf & Golf Ball:**
-  * Procedural cross-cut diamond mower striping with fine grass blade noise stippling.
-  * High-frequency micro-surface turf bump map for realistic sun grazing highlights.
-  * High-detail golf ball with procedural crater dimple normal map, clearcoat specular reflections, and contact soft shadow.
-  * Dynamic camera perspectives: **Behind Putter**, **Drone (Overhead)**, **Follow Ball**, and **Free Orbit**.
-* **Cinematic Lighting & Tone Mapping:** ACES Filmic tone mapping, PCF soft shadow mapping, warm directional sun with shadow bias calibration, and sky rim fill lighting.
+## Getting started
 
----
-
-### 3. Open-Birdie Aligned Physics Engine
-* **Rigorous Ball Roll Dynamics:** Directly implements the solid-sphere rolling inertia factor ($I = \frac{5}{7}$) and velocity decay equations validated by open-source golf research (Open-Birdie and USGA studies).
-* **Two-Phase Skid-to-Roll Model:**
-  * **Phase 1 (Skid):** Kinetic sliding friction ($\mu_k \approx 0.18$) with forward rotation spin acceleration until $\omega \cdot R = v$. Calculates exact **Time to Zero Skid** ($t_{\text{skid}} = \frac{2v_0}{7\mu g}$).
-  * **Phase 2 (True Roll):** Rolling friction coefficient ($\mu_r$) derived dynamically from the green's Stimpmeter rating:
-    $$\mu_r = \frac{2v_0^2}{2g \cdot d_{\text{stimp}}}$$
-* **Terrain-Aware Gradient Integration:** 4th-order Euler/Verlet step integration across undulating bicubic bezier terrain elevation grids. Gravity acceleration directly pulls the ball down slopes ($a_g = -g \cdot \nabla h$).
-* **Regulation Cup Capture Dynamics:**
-  * Ball center within hole radius ($r \le 5.39\text{ cm}$) evaluates arrival velocity.
-  * Captures putts at speeds $\le 1.62\text{ m/s}$ (~3.6 mph); high-speed strikes lip out or skip over the back edge.
-
----
-
-### 4. Synthesized Multi-Harmonic Cup Drop Audio
-* **Zero Audio Files / Zero Latency:** 100% procedural Web Audio API audio synthesis.
-* **Hollow Plastic/Metallic Resonance:** Dual decaying bandpass-filtered harmonics (180 Hz body thud + 720 Hz cup lip ping) followed by secondary rattle micro-clicks simulating the ball settling into the bottom of the cup.
-* **Crisp Impact Strike:** Transient click + short white noise turf burst triggered on ball impact.
-
----
-
-### 5. Tour Telemetry & Biomechanical Metrics
-* **Quintic-Inspired Consistency Tiers:**
-  * 🟦 **Eagle (Tour Level):** Face angle standard deviation $\sigma \le 0.45^\circ$, speed $\sigma \le 0.35\text{ mph}$.
-  * 🟩 **Birdie (Scratch / Pro):** Face angle $\sigma \le 0.75^\circ$, speed $\sigma \le 0.65\text{ mph}$.
-  * 🟨 **Par (Single Digit):** Face angle $\sigma \le 1.25^\circ$, speed $\sigma \le 1.10\text{ mph}$.
-  * 🟥 **Bogey (High Variance):** Face angle $\sigma > 1.25^\circ$, needs mechanical face stability drills.
-* **Impact Delivery Visualizer:** Dynamic visual display of face angle at impact, putter path, face-to-path delta, and launch line.
-* **Dynamic Loft & Skid Analysis:** Evaluates launch angle against the optimal **1.2° to 1.8° window** to prevent bounce or hop.
-
----
-
-### 6. Gamified Putting Drills
-1. **The Pressure Circle (Survival Mode):**
-   * Distances: **3ft**, **5ft**, **8ft**.
-   * Test: Continuous consecutive makes.
-   * **Dynamic Shrinking Cup:** Cup shrinks down from regulation 4.25″ to 2.3″ as streak grows. Missed putt resets streak.
-2. **Speed Control Zone (Bullseye Lag Mode):**
-   * Distances: **20ft**, **30ft**, **50ft**.
-   * Test: Stop the ball in the **3-foot safe zone past the hole**. Never leave putts short.
-   * Points awarded for safe-zone stops; heavy point deductions for putts left short of the cup.
-3. **The Scramble (9-Hole Gauntlet Challenge):**
-   * 9 randomized holes with varying distances (**6ft to 40ft**) and randomized course breaks (mild, medium, hard).
-   * **Dynamic Gimme Circle:** Scales with putt distance (1.5ft for short putts, up to 3.8ft for 40ft lag putts).
-   * Computes **Circular Error Probable (CEP 50%)** and **Strokes Gained: Putting (SG:P)** against PGA Tour ShotLink baselines.
-
----
-
-### 7. Zero-Hardware-Code Architecture & Open Connect Bridge
-* **Open Connect Standard:** Connects via local WebSocket (`ws://127.0.0.1:921`).
-* **Universal Compatibility:** Works seamlessly with community bridges for Square Golf, GSPro, OpenGolfSim, and OpenFlight.
-* **OpenSkyPlus-Style Sanitization:** Discards phantom swings, accidental foot taps (< 0.75 mph), chip shots (> 32 mph), and duplicate burst packets.
-* **Virtual Shot Simulator Studio:** Built-in test bench with 1-click test shots (*Pure Holed, Safe Zone, Push, Pull, Decel Short, Delofted Skid*) for instant development and testing without physical launch monitor hardware.
-
----
-
-## Quick start (v2)
+Requires Node.js 18+ (tested on 22).
 
 ```bash
-npm install          # adds Tailwind CSS (new dependency)
-npm run dev          # app at http://localhost:3000
-npm run bridge       # in a second terminal, to receive putts from your Square
-```
-
-**Connecting the Square:** GSPro Open Connect connectors dial *into* a server on port 921, which a web page cannot be. `npm run bridge` plays GSPro's role on 127.0.0.1:921 and relays shots to the app on ws://127.0.0.1:9210. Close GSPro first, then point your Square/GSPro connector at GSPro as usual. The bridge also tells the monitor a putter is selected.
-
-**Physics:** skid-then-roll model (Penner 2002) with rolling resistance from the Stimpmeter (1.83 m/s release), full-gravity skid / 5/7-gravity roll on slopes, and a capture model where cup entry speed limits depend on how centred the ball is (lip-outs happen). Validate with `npm run check:physics`.
-
-**Greens:** deterministic seeded surfaces (tilts, crowns, bowls, double breaks, tiers), scaled so the steepest slope matches the difficulty (Mild ≤1°, Medium ≤2°, Hard ≤3°), with the hole location capped to a fair slope for the stimp.
-
----
-
-## 🛠️ Tech Stack
-
-* **Framework:** Next.js 16+ (App Router, Turbopack)
-* **Language:** TypeScript 5+ (Strict mode, 100% typed)
-* **3D Graphics:** Three.js (`three` + `three/examples/jsm/objects/Sky.js`)
-* **Styling:** Vanilla CSS (Dark mode kiosk aesthetic, responsive single-monitor layout)
-* **Audio:** Web Audio API Procedural Synthesizer
-* **Code Quality:** 0 ESLint errors, 0 ESLint warnings, 0 TypeScript errors
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-* Node.js 18+ (tested on Node 20 and Node 24)
-* npm, pnpm, or yarn
-
-### Installation
-```bash
-# Clone the repository
-git clone https://github.com/your-username/SquarePutt.git
-cd SquarePutt
-
-# Install dependencies
 npm install
-
-# Start development server
-npm run dev
+npm run dev            # open http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) in your browser.
+No launch monitor? Use **Hit a virtual putt** (bottom-left of the green) to play every mode with simulated strokes.
 
-### Production Build
+### Connecting your Square
+
+GSPro Open Connect connectors dial *into* a server on port 921. A web page can't be that server, so SquarePutt ships a small bridge that plays GSPro's part and relays shots to the app.
+
+1. **Close GSPro** (only one program can use port 921).
+2. In a second terminal: `npm run bridge`
+3. In your Square Golf software / GSPro connector, choose GSPro as the simulator as you normally would. The bridge accepts the connection, tells the monitor a putter is selected (so it switches to putting mode), and forwards every putt.
+4. The status pill in the top bar turns green when the monitor is connected.
+
+Bridge options: `npm run bridge -- --gspro-port 921 --ws-port 9210 --handed LH --verbose`. The bridge has no dependencies and logs every shot it receives — check its window first if putts don't appear.
+
+### Scripts
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Development server |
+| `npm run build` / `npm start` | Production build / serve |
+| `npm run bridge` | Launch monitor bridge (TCP 921 → WebSocket 9210) |
+| `npm run lint` | ESLint |
+| `npm run check:physics` | Prints physics calibration, green slope statistics and aim-solver results |
+
+---
+
+## Modes
+
+### Practice
+Free putting at any distance (3–50 ft), slope (Flat, Mild, Medium, Hard) and green speed (stimp 9–12). **New green** generates a different contour. The read panel tells you the putt like a caddie would: distance, uphill/downhill in inches, break direction and slope %, where to aim ("inside left edge", "1.5 cups right") and the ideal ball speed.
+
+### Short putts — Pressure circle
+Survival drill from 3, 5 or 8 ft, or a **3→8 ft ladder** (three makes in a row moves you back a foot, a miss moves you up). Every putt comes from a different position around the hole, so each one breaks differently and has to be read. Makes in a row shrink the cup (to a minimum of 2.55″). Choose one, three or five lives. Tracks streak, make %, and face-angle spread graded Eagle → Bogey.
+
+### Lag putts — Speed control
+Sets of 10 or 15 putts at 20, 30, 50 ft or **mixed 20–50 ft** (recommended: changing length every putt builds feel that transfers to the course).
+
+| Finish | Points |
+|---|---|
+| Holed | +5 |
+| Past the hole, within 3 ft | +3 |
+| Within 3 ft but short | +1 |
+| 3–6 ft long | 0 |
+| Short (outside 3 ft), or over 6 ft long | −1 |
+| Third good putt in a row, and each after | +1 combo bonus |
+
+The 3 ft zone is drawn on the green, and every finish in the set stays marked. Tracks front-to-back distance spread.
+
+### The Scramble
+A 9- or 18-hole putting round. Each hole is a new green, distance (6–40 ft) and break. You putt out from wherever the ball stops; anything inside the gimme circle is given (gimme grows with putt length, 1.5–3.8 ft). Par is two putts per hole. Shows score to par, a scorecard, and **strokes gained** against the PGA Tour putting baseline, plus one-putts, three-putts and first-putt proximity.
+
+### Stats
+Make % by distance against the PGA Tour average, a scatter of where missed putts finish, average pace and start-line bias against the ideal stroke, personal bests, and export / import / clear of your data. Filter by under 10 ft, 10–20 ft, or 20 ft+.
+
+---
+
+## What you see after each putt
+
+- **Result:** holed, lipped out, or e.g. "2.1 ft short, 3 in left".
+- **Ball speed** and how it compares with the ideal speed for that putt ("4% firm").
+- **Start line** and how far it was from the ideal start line on that green ("0.5° right of ideal").
+- **Impact diagram:** putter face, path and start line from above (angles drawn 4× for clarity), with face (open/closed), path (in-to-out/out-to-in) and start direction.
+- **Skid, launch angle and roll distance**, with a note if launch is too low or high.
+- **Last 10 putts:** face angle and pace trend, with face-angle spread graded.
+
+Grades use the Quintic-style tiers: **Eagle** (tour level), **Birdie**, **Par**, **Bogey**.
+
+---
+
+## How it works
+
+### Physics (`src/lib/physicsEngine.ts`)
+Based on Penner, *The physics of putting* (Can. J. Phys., 2002) and Holmes (1991).
+
+- **Skid:** the ball leaves the face sliding. Kinetic friction (μ = 0.2) slows it and spins it up until it rolls; with no launch spin it keeps 5/7 of its speed. Backspin/topspin from the monitor is used when sent.
+- **Roll:** constant rolling resistance from the Stimpmeter definition (the USGA ramp releases a rolling ball at 1.83 m/s, which rolls *S* ft). On slopes, gravity acts fully on a sliding ball and at 5/7 strength on a rolling ball.
+- **Cup:** a ball falls in if it drops a ball-radius while its centre crosses the hole: max speed ≈ 1.63 m/s dead centre, much less near the edge. Faster balls lip out (deflected) or hop the cup.
+- **Calibration:** on flat ground this gives ~0.39 ft per mph² at stimp 10 (e.g. 9 mph → ~31 ft), matching measured launch-monitor putting data. A **ball speed calibration** setting (85–115%) lets you match your monitor to a real green.
+- **Ideal stroke:** a solver finds the start line and speed that send the ball through the centre of the cup and, without the cup, ~17 in past. It drives the aim hint, the optional ideal line, and the "% firm" and "° right of ideal" feedback.
+
+Putts play back in real time — a 40 ft lag takes several seconds, as on a real green.
+
+### Real greens (`src/lib/realGreens.ts`, `public/greens/library.json`)
+By default SquarePutt plays on **19 real championship greens**, surveyed from public data:
+
+| Course | Greens |
+|---|---|
+| Augusta National | 3 (holes 8, 10, 11) |
+| Hazeltine National | 4 |
+| Cog Hill | 4 |
+| TPC Sawgrass | 4 (holes 1, 5, 9, 18) |
+| Pinehurst No. 2 | 4 (lower-detail elevation, ~3 m) |
+
+- **Outlines** come from OpenStreetMap (`golf=green`); **elevation** from USGS 3DEP lidar (1 m), lightly smoothed and stored on a 0.5 m grid. Physics reads it with smooth bicubic interpolation.
+- Each green has up to **7 pin positions** (at least 3.5 m from the edge, no steeper than 3% at the hole, spread apart) — 128 pins in total.
+- Each pin is **pre-rated** from the slopes within 7 m (23 ft) of the hole: Mild if the 90th-percentile slope is ≤ 3.1%, Medium ≤ 4.2%, Hard above — the gentlest, middle and steepest thirds of real pins (42 / 44 / 42).
+- The **Slope** setting picks a real pin with that rating; **Next green or pin** cycles through them. Drills and the Scramble use them too. Flat, and Settings → Greens → Generated, use generated greens.
+- The ball is always placed on the real putting surface; the green's true outline is drawn with a 1 m collar.
+- Validate with `npm run check:real-greens` (solves and holes the ideal stroke from 6, 15 and 30 ft on every pin).
+
+**Rebuilding or adding courses** (`scripts/greens/`, Python with numpy, scipy, tifffile, pyproj, shapely; needs access to overpass-api.de and elevation.nationalmap.gov):
 ```bash
-npm run build
-npm run start
+python3 osm_one.py <key> "<course name regex>" "<south,west,north,east>"   # OSM greens + course outline
+python3 build.py <key> "<course name>" 4                                   # elevation, pins, ratings
+python3 merge.py                                                           # writes public/greens/library.json
+```
+Mapped "greens" whose interior median slope exceeds 3.5% are rejected (usually par-3-course greens or outlines that include banks). Elevation reflects the lidar survey date; greens rebuilt since then will differ.
+
+### Generated greens (`src/lib/green.ts`)
+Each green is a smooth, deterministic function of a seed built from real green features: a gentle drainage tilt (usually back to front); a signature feature (crown, bowl, double break, two-tier ridge, or a spine/swale running down the green); 4–8 stretched mounds and swales at varied angles; and a rolling undulation over the whole surface. Slope direction changes across the green as on real greens — typically 40–50% of the putting area falls in a clearly different direction from the main tilt (`npx tsx scripts/green-shape.ts` measures this). The whole surface is scaled so its steepest slope (a hard cap) matches the difficulty:
+
+| Difficulty | Steepest slope on the green |
+|---|---|
+| Flat | 0° |
+| Mild | 0.6–1.0° |
+| Medium | 1.3–2.0° |
+| Hard | 2.2–3.0° |
+
+Slope at the hole is capped to what superintendents use for that green speed (about 3.5% at stimp 9 down to 2% at stimp 12), so the ball can stop near the cup. Physics and graphics read the same surface.
+
+### Graphics (`src/components/green/greenScene.ts`)
+Plain Three.js, kept lightweight: one terrain mesh, a sky, a distant treeline. A low sun rakes across the green so slopes catch light and shadow. A small shader on the terrain draws the green edge, mowing stripes, and the optional overlays without extra geometry:
+
+- **Slope lines** (as in the Square app): the slope is split into its two parts and shown on the 1 ft grid. Lines running across the putt flow with the left/right slope; lines running toward the hole flow with the uphill/downhill slope. Faster, brighter and warmer (blue → yellow → red at 3%+) means steeper; you combine the two yourself
+- **Show slopes:** on-screen height exaggeration (true, 2×, 3× default, 5×). Real greens rarely tilt more than 3°, which looks flat on a screen; this raises the shape for display only — the ball always rolls on the true-scale green
+- **1 ft grid:** bends with the surface
+- **Contour lines:** lines of equal height
+- **Height map:** red high, blue low
+- **Line to the hole** and **ideal line**
+
+Cameras: behind the ball, follow, overhead, and free (drag to rotate, scroll to zoom).
+
+### Sound (`src/components/ui/AudioEngine.ts`)
+Synthesized, no audio files. The cup drop is physically modelled: the ball falls ~85 mm onto the cup bottom and rebounds with shrinking gaps, each impact ringing resonances tuned to a plastic cup, slightly different every time. To use a recording instead, put it at `public/sounds/cup-drop.mp3`.
+
+### Launch monitor data (`src/lib/dataSanitizer.ts`, `src/lib/openConnectService.ts`)
+Heartbeats and status messages are ignored. Phantom triggers (< 0.75 mph), chips (> 30 mph), odd launch angles, low-confidence reads and duplicate packets are filtered out and briefly reported on screen. Putts that arrive while a ball is still rolling are ignored.
+
+### Drills (`src/lib/drills.ts`)
+Each drill is a pure state machine (`new… / …Layout / …OnShot`), separate from the UI.
+
+---
+
+## Project layout
+
+```
+bridge/squareputt-bridge.mjs     GSPro Open Connect → WebSocket bridge
+scripts/physics-check.ts         Physics and green validation report
+src/app/                         Next.js entry, global styles (Tailwind theme)
+src/components/App.tsx           App state: modes, drills, shots, layout
+src/components/green/            Three.js scene + React wrapper
+src/components/hud/              Read panel, result banner, virtual putts, last-putt panel
+src/components/drills/           Drill scoreboards
+src/components/settings/         Settings and launch monitor panels
+src/components/stats/            Stats page
+src/components/ui/               Top bar, controls, sound
+src/lib/                         Physics, greens, drills, scoring, storage, connection
 ```
 
----
+## Data and privacy
+Everything is stored in your browser's local storage (settings, last 1,000 putts, personal bests). Use **Stats → Export** to back up or move to another computer.
 
-## ⛳ Connecting Your Square Golf Launch Monitor
+## Known limitations
+- Live play with a Square has been verified against the GSPro protocol with a simulated connector, not yet with Square hardware.
+- Fonts load from Google Fonts; offline, a system font is used.
+- No cloud accounts or sync yet (the spec's PostgreSQL profiles are not built).
+- Real greens use public lidar, which can't capture features smaller than about 1 m and may predate recent green rebuilds.
 
-1. Power on your **Square Golf Launch Monitor** and pair it to your PC via Bluetooth.
-2. Launch your preferred community connector (e.g. OpenGolfSim or GSPro Open Connect bridge) and set the broadcast port to `921`.
-3. In SquarePutt, verify the status badge in the top right shows **Square Live** (green).
-4. Step up to your putting mat and roll a putt — live photometric metrics and 3D roll physics will instantly stream to your screen!
+## Data credits
+Green outlines © OpenStreetMap contributors (ODbL). Elevation: USGS 3D Elevation Program (public domain).
 
----
-
-## 📄 License
-MIT License. Created for the golf simulation community.
+## License
+MIT

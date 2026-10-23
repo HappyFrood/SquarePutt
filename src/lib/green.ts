@@ -53,7 +53,18 @@ export function mulberry32(seed: number): () => number {
 interface Bump {
   cx: number;
   cz: number;
-  sigma: number;
+  /** spread along the bump's long axis and across it (m) */
+  su: number;
+  sv: number;
+  cos: number;
+  sin: number;
+  amp: number;
+}
+
+interface Wave {
+  kx: number;
+  kz: number;
+  phase: number;
   amp: number;
 }
 
@@ -61,8 +72,8 @@ interface Tier {
   nx: number; // unit normal of the tier line
   nz: number;
   offset: number; // signed distance of the tier line from the hole
-  height: number; // total step height
   width: number; // transition half-width (m)
+  strength: number;
 }
 
 export type GreenArchetype =
@@ -82,7 +93,21 @@ export interface GreenDescriptor {
   holeFallDirRad: number;
 }
 
-export class GreenSurface {
+/** Anything the ball can roll on: generated or real (lidar) greens. Hole at the origin. */
+export interface PuttingSurface {
+  readonly difficulty: SlopeDifficulty;
+  readonly seed: number;
+  readonly stimp: number;
+  /** Real greens: outline of the putting surface, relative to the hole. */
+  readonly outline?: Vec2[];
+  /** Real greens: e.g. "Augusta National — hole 10 · pin 3". */
+  readonly label?: string;
+  height(x: number, z: number): number;
+  gradient(x: number, z: number): { dhdx: number; dhdz: number };
+  slopePct(x: number, z: number): number;
+}
+
+export class GreenSurface implements PuttingSurface {
   readonly difficulty: SlopeDifficulty;
   readonly seed: number;
   readonly stimp: number;
@@ -91,6 +116,7 @@ export class GreenSurface {
   private tiltX = 0;
   private tiltZ = 0;
   private bumps: Bump[] = [];
+  private waves: Wave[] = [];
   private tier: Tier | null = null;
   private scale = 1;
   // Local flattening around the hole: h -= flatK * w(r) * (gx*x + gz*z)
@@ -115,11 +141,11 @@ export class GreenSurface {
     const rnd = mulberry32(this.seed * 7919 + difficulty.length * 104729);
     this.archetype = this.build(rnd);
 
-    // 1. Normalize so the steepest (98th percentile) slope in the play area hits the target.
+    // 1. Normalize so the steepest slope in the play area hits the target.
     const [lo, hi] = DIFFICULTY_MAX_SLOPE_DEG[difficulty];
     const targetDeg = lo + (hi - lo) * rnd();
     const targetGrade = Math.tan((targetDeg * Math.PI) / 180);
-    const p98 = this.slopePercentile(0.98);
+    const p98 = this.slopePercentile(1); // true max: difficulty limits are hard caps
     this.scale = p98 > 1e-9 ? targetGrade / p98 : 0;
 
     // 2. Cap slope at the hole so the pin is fair for the green speed.
@@ -151,67 +177,72 @@ export class GreenSurface {
         ? ['back-to-front', 'side-hill', 'crowned', 'bowl', 'double-break', 'two-tier']
         : ['side-hill', 'crowned', 'double-break', 'two-tier', 'two-tier', 'bowl'];
     const archetype = pool[Math.floor(rnd() * pool.length)];
+    const rr = (a: number, b: number) => a + (b - a) * rnd();
+    const sign = () => (rnd() < 0.5 ? -1 : 1);
 
-    // Overall drainage tilt (every green has one). Biased toward draining to the front.
+    // 1. Drainage tilt: present on every green but no longer dominant.
     const tiltDir =
       archetype === 'side-hill'
-        ? (rnd() < 0.5 ? -1 : 1) * (Math.PI / 2 + (rnd() - 0.5) * 0.8)
+        ? sign() * (Math.PI / 2 + (rnd() - 0.5) * 0.8)
         : Math.PI + (rnd() - 0.5) * 1.6; // falls roughly toward -z (front of green)
-    const tiltMag = archetype === 'crowned' || archetype === 'bowl' ? 0.35 : 1.0;
-    // Gradient vector points uphill; fall direction is tiltDir.
+    const tiltMag =
+      archetype === 'crowned' || archetype === 'bowl' ? rr(0.12, 0.22) : archetype === 'side-hill' || archetype === 'back-to-front' ? rr(0.35, 0.5) : rr(0.2, 0.35);
     this.tiltX = -Math.sin(tiltDir) * tiltMag;
     this.tiltZ = -Math.cos(tiltDir) * tiltMag;
 
-    const addBump = (cx: number, cz: number, sigma: number, weight: number) => {
-      // amplitude chosen so the bump's own max slope ~= |weight|
-      this.bumps.push({ cx, cz, sigma, amp: (weight * sigma) / 0.6065 });
+    // Stretched (anisotropic) mounds and hollows: ridges, spines and swales.
+    const addBump = (cx: number, cz: number, su: number, sv: number, angle: number, weight: number) => {
+      // amplitude so the feature's own max slope ~= |weight|
+      const sMin = Math.min(su, sv);
+      this.bumps.push({ cx, cz, su, sv, cos: Math.cos(angle), sin: Math.sin(angle), amp: (weight * sMin) / 0.6065 });
     };
-    const rr = (a: number, b: number) => a + (b - a) * rnd();
-    const sizeScale = d === 'mild' ? 1.4 : d === 'medium' ? 1.0 : 0.8;
+    const sizeScale = d === 'mild' ? 1.35 : d === 'medium' ? 1.0 : 0.85;
 
+    // 2. The archetype's signature feature.
     switch (archetype) {
       case 'crowned': {
         const ang = rnd() * Math.PI * 2;
-        const dist = rr(3, 7);
-        addBump(Math.cos(ang) * dist, Math.sin(ang) * dist, rr(4, 6.5) * sizeScale, rr(0.9, 1.3));
+        const dist = rr(2, 6);
+        addBump(Math.cos(ang) * dist, Math.sin(ang) * dist, rr(5, 8) * sizeScale, rr(3.5, 5) * sizeScale, rnd() * Math.PI, rr(0.9, 1.2));
         break;
       }
-      case 'bowl': {
-        addBump(rr(-3, 3), rr(-3, 3), rr(5, 8) * sizeScale, -rr(0.9, 1.2));
+      case 'bowl':
+        addBump(rr(-3, 3), rr(-3, 3), rr(6, 9) * sizeScale, rr(4, 6) * sizeScale, rnd() * Math.PI, -rr(0.9, 1.1));
         break;
-      }
       case 'double-break': {
-        const side = rnd() < 0.5 ? -1 : 1;
-        addBump(side * rr(2, 4), rr(-9, -4), rr(3, 4.5) * sizeScale, rr(0.8, 1.1));
-        addBump(-side * rr(2, 4), rr(-3, 1), rr(3, 4.5) * sizeScale, rr(0.8, 1.1));
+        const side = sign();
+        addBump(side * rr(1.5, 3.5), rr(-8, -4), rr(4, 7) * sizeScale, rr(2, 3) * sizeScale, rr(-0.5, 0.5), rr(0.8, 1.1));
+        addBump(-side * rr(1.5, 3.5), rr(-3, 1), rr(4, 7) * sizeScale, rr(2, 3) * sizeScale, rr(-0.5, 0.5), rr(0.8, 1.1));
         break;
       }
       case 'two-tier': {
-        const ang = Math.PI + (rnd() - 0.5) * 1.2; // tier mostly crosses the line of play
-        this.tier = {
-          nx: Math.sin(ang),
-          nz: Math.cos(ang),
-          offset: rr(2.5, 6) * (rnd() < 0.5 ? 1 : -1),
-          height: 1, // relative; normalization scales it
-          width: rr(0.9, 1.6),
-        };
+        const ang = Math.PI + (rnd() - 0.5) * 1.2;
+        this.tier = { nx: Math.sin(ang), nz: Math.cos(ang), offset: rr(2.5, 6) * sign(), width: rr(0.9, 1.6), strength: rr(1.1, 1.5) };
         break;
       }
-      default:
-        break;
+      default: {
+        // a spine or swale running down the green
+        addBump(rr(-4, 4), rr(-8, 2), rr(7, 11) * sizeScale, rr(2, 3.2) * sizeScale, tiltDir + rr(-0.4, 0.4), sign() * rr(0.6, 0.9));
+      }
     }
 
-    // Secondary undulations — what makes reads subtle.
-    const extra = d === 'mild' ? 2 : d === 'medium' ? 3 : 4;
+    // 3. Secondary mounds and swales of mixed size and orientation.
+    const extra = d === 'mild' ? 4 : d === 'medium' ? 6 : 8;
     for (let i = 0; i < extra; i++) {
       const ang = rnd() * Math.PI * 2;
-      const dist = rr(1, PLAY_RADIUS_M * 0.8);
-      addBump(
-        Math.cos(ang) * dist,
-        Math.sin(ang) * dist,
-        rr(2.5, 6) * sizeScale,
-        (rnd() < 0.5 ? -1 : 1) * rr(0.25, 0.6)
-      );
+      const dist = Math.sqrt(rnd()) * PLAY_RADIUS_M * 0.85;
+      const su = rr(2.5, 6.5) * sizeScale;
+      addBump(Math.cos(ang) * dist, Math.sin(ang) * dist, su, su * rr(0.35, 1), rnd() * Math.PI, sign() * rr(0.35, 0.8));
+    }
+
+    // 4. Gentle rolling undulation over the whole surface (sum of long, random waves).
+    const nWaves = 6;
+    for (let i = 0; i < nWaves; i++) {
+      const dir = rnd() * Math.PI * 2;
+      const wl = rr(7, 16) * sizeScale; // wavelength (m)
+      const k = (2 * Math.PI) / wl;
+      // amplitude so each wave's max slope is ~0.12–0.2
+      this.waves.push({ kx: Math.cos(dir) * k, kz: Math.sin(dir) * k, phase: rnd() * Math.PI * 2, amp: rr(0.12, 0.2) / k });
     }
     return archetype;
   }
@@ -221,13 +252,15 @@ export class GreenSurface {
     for (const b of this.bumps) {
       const dx = x - b.cx;
       const dz = z - b.cz;
-      h += b.amp * Math.exp(-(dx * dx + dz * dz) / (2 * b.sigma * b.sigma));
+      const u = dx * b.cos + dz * b.sin;
+      const v = -dx * b.sin + dz * b.cos;
+      h += b.amp * Math.exp(-(u * u) / (2 * b.su * b.su) - (v * v) / (2 * b.sv * b.sv));
     }
+    for (const w of this.waves) h += w.amp * Math.sin(w.kx * x + w.kz * z + w.phase);
     if (this.tier) {
       const t = this.tier;
-      // height chosen so the tier face slope (h/2w) is ~1.6x the tilt
       const s = x * t.nx + z * t.nz - t.offset;
-      h += 1.6 * t.width * (1 + Math.tanh(s / t.width));
+      h += t.strength * t.width * (1 + Math.tanh(s / t.width));
     }
     return h;
   }
@@ -238,16 +271,24 @@ export class GreenSurface {
     for (const b of this.bumps) {
       const dx = x - b.cx;
       const dz = z - b.cz;
-      const s2 = b.sigma * b.sigma;
-      const e = b.amp * Math.exp(-(dx * dx + dz * dz) / (2 * s2));
-      gx += (-dx / s2) * e;
-      gz += (-dz / s2) * e;
+      const u = dx * b.cos + dz * b.sin;
+      const v = -dx * b.sin + dz * b.cos;
+      const e = b.amp * Math.exp(-(u * u) / (2 * b.su * b.su) - (v * v) / (2 * b.sv * b.sv));
+      const hu = (-u / (b.su * b.su)) * e;
+      const hv = (-v / (b.sv * b.sv)) * e;
+      gx += hu * b.cos - hv * b.sin;
+      gz += hu * b.sin + hv * b.cos;
+    }
+    for (const w of this.waves) {
+      const c = w.amp * Math.cos(w.kx * x + w.kz * z + w.phase);
+      gx += c * w.kx;
+      gz += c * w.kz;
     }
     if (this.tier) {
       const t = this.tier;
       const s = x * t.nx + z * t.nz - t.offset;
       const sech = 1 / Math.cosh(s / t.width);
-      const dh = 1.6 * sech * sech; // d/ds of 1.6w(1+tanh(s/w))
+      const dh = t.strength * sech * sech;
       gx += dh * t.nx;
       gz += dh * t.nz;
     }
@@ -312,7 +353,7 @@ export interface PuttRead {
   holeSlopePct: number;
 }
 
-export function readPutt(surface: GreenSurface, ball: Vec2, hole: Vec2 = { x: 0, z: 0 }): PuttRead {
+export function readPutt(surface: PuttingSurface, ball: Vec2, hole: Vec2 = { x: 0, z: 0 }): PuttRead {
   const dx = hole.x - ball.x;
   const dz = hole.z - ball.z;
   const dist = Math.hypot(dx, dz);

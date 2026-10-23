@@ -326,8 +326,12 @@ export function scrambleOnShot(s: ScrambleState, shot: PuttingShotData): { state
   const curDist = scrambleCurrentDistanceFt(s);
   const gimme = gimmeRadiusFt(curDist);
   const first = s.strokes === 0;
+  // On real greens the ball spot may differ slightly from the planned length; score from the actual putt.
+  const startFt = first ? shot.targetDistanceFt : hole.startDistanceFt;
+  const holes = first ? s.holes.map((h, i) => (i === s.holeIdx ? { ...h, startDistanceFt: startFt } : h)) : s.holes;
   const n: ScrambleState = {
     ...s,
+    holes,
     strokes,
     firstLeaveFt: first ? shot.leaveFt : s.firstLeaveFt,
     firstDev: first ? { xInches: shot.lateralErrorInches, zInches: shot.distanceErrorFt * 12 } : s.firstDev,
@@ -354,11 +358,11 @@ export function scrambleOnShot(s: ScrambleState, shot: PuttingShotData): { state
   }
 
   if (finalStrokes !== null) {
-    const sg = getPgaExpectedPutts(hole.startDistanceFt) - finalStrokes;
+    const sg = getPgaExpectedPutts(startFt) - finalStrokes;
     n.card = [
       ...s.card,
       {
-        startDistanceFt: hole.startDistanceFt,
+        startDistanceFt: startFt,
         strokes: finalStrokes,
         sg,
         firstLeaveFt: n.firstLeaveFt ?? 0,

@@ -15,6 +15,13 @@ export const SLOPE_OPTIONS: { value: SlopeDifficulty; label: string }[] = [
   { value: 'hard', label: 'Hard' },
 ];
 
+const REAL_SLOPE_HINT: Record<SlopeDifficulty, string> = {
+  flat: 'Dead level — pure stroke mechanics.',
+  mild: 'The gentlest third of real championship pin positions.',
+  medium: 'Typical championship pins: distinct breaks around the hole.',
+  hard: 'The most severe third — Augusta-style slopes around the hole.',
+};
+
 const SLOPE_HINT: Record<SlopeDifficulty, string> = {
   flat: 'Dead level — pure stroke mechanics.',
   mild: 'Gentle breaks, up to 1°.',
@@ -36,6 +43,7 @@ export function SettingsDrawer({
   settings,
   onChange,
   onNewGreen,
+  realGreensAvailable,
 }: {
   open: boolean;
   onClose: () => void;
@@ -43,6 +51,7 @@ export function SettingsDrawer({
   settings: AppSettings;
   onChange: (patch: Partial<AppSettings>) => void;
   onNewGreen: () => void;
+  realGreensAvailable: boolean;
 }) {
   if (!open) return null;
   const s = settings;
@@ -63,6 +72,23 @@ export function SettingsDrawer({
 
         <div className="flex-1 space-y-8 overflow-y-auto px-5 py-6">
           <Group title="Green">
+            {realGreensAvailable && (
+              <Field label="Greens">
+                <Segmented
+                  value={s.greenSource}
+                  onChange={(v) => onChange({ greenSource: v })}
+                  options={[
+                    { value: 'real', label: 'Real greens' },
+                    { value: 'generated', label: 'Generated' },
+                  ]}
+                />
+                <p className="text-xs text-fog">
+                  {s.greenSource === 'real'
+                    ? '19 surveyed greens from Augusta National, Hazeltine, Cog Hill, TPC Sawgrass and Pinehurst No. 2, each with rated pin positions.'
+                    : 'Endless computer-generated greens.'}
+                </p>
+              </Field>
+            )}
             <Field label={`Speed — ${stimpLabel(s.stimp)}`} value={`Stimp ${s.stimp.toFixed(1)}`}>
               <input
                 type="range"
@@ -106,10 +132,10 @@ export function SettingsDrawer({
                 </Field>
                 <Field label="Slope">
                   <Segmented value={s.practiceDifficulty} options={SLOPE_OPTIONS} onChange={(v) => onChange({ practiceDifficulty: v })} />
-                  <p className="text-xs text-fog">{SLOPE_HINT[s.practiceDifficulty]}</p>
+                  <p className="text-xs text-fog">{(realGreensAvailable && s.greenSource === 'real' ? REAL_SLOPE_HINT : SLOPE_HINT)[s.practiceDifficulty]}</p>
                 </Field>
                 <Button variant="quiet" onClick={onNewGreen} className="w-full" disabled={s.practiceDifficulty === 'flat'}>
-                  <Shuffle size={16} /> New green
+                  <Shuffle size={16} /> {realGreensAvailable && s.greenSource === 'real' ? 'Next green or pin' : 'New green'}
                 </Button>
               </>
             )}
@@ -137,8 +163,23 @@ export function SettingsDrawer({
                   : 'Also draws the ideal path at perfect speed.'}
               </p>
             </Field>
+            <Field label="Show slopes">
+              <Segmented
+                value={s.slopeExaggeration}
+                onChange={(v) => onChange({ slopeExaggeration: v })}
+                options={[
+                  { value: 1, label: 'True' },
+                  { value: 2, label: '2×' },
+                  { value: 3, label: '3×' },
+                  { value: 5, label: '5×' },
+                ]}
+              />
+              <p className="text-xs text-fog">
+                Real greens rarely tilt more than 3°, which looks flat on a screen. This raises the hills and hollows on screen only — the ball always rolls on the true-scale green.
+              </p>
+            </Field>
             <div className="divide-y divide-line/60">
-              <Toggle checked={s.fallLines} onChange={(v) => onChange({ fallLines: v })} label="Fall lines" hint="Moving dots that flow downhill" />
+              <Toggle checked={s.fallLines} onChange={(v) => onChange({ fallLines: v })} label="Slope lines" hint="Grid lines flow downhill: across-the-line slope on one set, up/down on the other. Faster and warmer = steeper." />
               <Toggle checked={s.grid} onChange={(v) => onChange({ grid: v })} label="1 ft grid" hint="Bends with the surface to show contour" />
               <Toggle checked={s.contours} onChange={(v) => onChange({ contours: v })} label="Contour lines" hint="Lines of equal height" />
               <Toggle checked={s.heatmap} onChange={(v) => onChange({ heatmap: v })} label="Height map" hint="Red is high, blue is low" />

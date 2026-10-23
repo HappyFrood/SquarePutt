@@ -1,13 +1,13 @@
 'use client';
 
 import React, { useEffect, useRef } from 'react';
-import { GreenSurface, Vec2 } from '@/lib/green';
+import { PuttingSurface, Vec2 } from '@/lib/green';
 import { CameraMode, PuttingShotData } from '@/lib/types';
 import { audioEngine } from '@/components/ui/AudioEngine';
 import { GreenScene, MarkerSpec, RingSpec, SceneOverlays } from './greenScene';
 
 interface Props {
-  surface: GreenSurface;
+  surface: PuttingSurface;
   ball: Vec2;
   holeRadiusMultiplier: number;
   shot: PuttingShotData | null;
@@ -19,6 +19,8 @@ interface Props {
   outline: { anchor?: Vec2; radiusM?: number };
   /** Increment to put the ball back on its spot after a putt. */
   resetKey: number;
+  /** Display-only vertical exaggeration of the green. */
+  exaggeration: number;
   onRollComplete: () => void;
 }
 
@@ -34,6 +36,7 @@ export function PuttingGreenCanvas({
   markers,
   outline,
   resetKey,
+  exaggeration,
   onRollComplete,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -73,6 +76,10 @@ export function PuttingGreenCanvas({
     // ball is compared by value to avoid rebuilding when a new but identical object arrives
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [surface, ball.x, ball.z, holeRadiusMultiplier, outline.anchor?.x, outline.anchor?.z, outline.radiusM]);
+
+  useEffect(() => {
+    sceneRef.current?.setExaggeration(exaggeration);
+  }, [exaggeration]);
 
   useEffect(() => {
     if (resetKey > 0) sceneRef.current?.resetBall();
