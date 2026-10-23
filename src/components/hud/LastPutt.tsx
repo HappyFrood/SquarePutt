@@ -5,7 +5,7 @@ import { PuttingShotData } from '@/lib/types';
 import { analyzeDynamicLoft, calculateStdDev, gradeFaceAngleVariance } from '@/lib/calculations';
 import { Grade, Panel } from '@/components/ui/controls';
 import { Check, X } from 'lucide-react';
-import { diagnose, DiagPart } from '@/lib/diagnosis';
+import { diagnose, DiagPart, fmtDeg, readDegrees } from '@/lib/diagnosis';
 
 
 function outcome(s: PuttingShotData) {
@@ -147,12 +147,7 @@ function Diagnosis({ shot }: { shot: PuttingShotData }) {
         <Part label="Start line" p={d.line} />
         <Part label="Pace" p={d.pace} />
       </div>
-      {shot.read && shot.read.verdict !== 'good' && (
-        <p className="mt-2 text-xs text-mist">
-          Your line at perfect pace would finish {Math.round(Math.abs(shot.read.missIn))} in {shot.read.missIn > 0 ? 'right' : 'left'} of the hole. The ideal line aims{' '}
-          {Math.abs(shot.read.idealIn) < 1 ? 'at the centre' : `${Math.abs(shot.read.idealIn) >= 12 ? `${(Math.abs(shot.read.idealIn) / 12).toFixed(1)} ft` : `${Math.round(Math.abs(shot.read.idealIn))} in`} ${shot.read.idealIn > 0 ? 'right' : 'left'}`}.
-        </p>
-      )}
+      {shot.read && <ReadLine shot={shot} />}
     </div>
   );
 }
@@ -167,5 +162,26 @@ function Part({ label, p }: { label: string; p: DiagPart }) {
       </div>
       <div className={`mt-0.5 text-sm font-semibold leading-tight ${tone}`}>{p.text}</div>
     </div>
+  );
+}
+
+function ReadLine({ shot }: { shot: PuttingShotData }) {
+  const d = readDegrees(shot);
+  const dir = (v: number) => (Math.abs(v) < 0.01 ? 'straight at the hole' : `${fmtDeg(v)} ${v > 0 ? 'right' : 'left'}`);
+  return (
+    <p className="mt-2 text-xs text-mist">
+      You aimed {dir(d.aimDeg)}; the read needed {dir(d.idealDeg)}
+      {d.breakPlayedPct !== undefined ? ` — you played ${d.breakPlayedPct}% of the break` : ''}.
+      {shot.read?.paceLineDeg !== undefined && shot.speedErrorPct !== undefined && (
+        <>
+          {' '}
+          {shot.read.paceLineDeg === null
+            ? `At the pace you hit (${Math.abs(shot.speedErrorPct).toFixed(0)}% soft), the ball can't reach the hole on any line.`
+            : shot.read.paceLineHoles === false
+            ? `At the pace you hit (${Math.abs(shot.speedErrorPct).toFixed(0)}% firm), even the centre line (${dir(shot.read.paceLineDeg)}) lips out.`
+            : `At the pace you hit (${Math.abs(shot.speedErrorPct).toFixed(0)}% ${shot.speedErrorPct > 0 ? 'firm' : 'soft'}), the line that holes is ${dir(shot.read.paceLineDeg)}.`}
+        </>
+      )}
+    </p>
   );
 }

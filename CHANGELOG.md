@@ -1,5 +1,30 @@
 # Changelog
 
+## 2.4.3 — October 2026
+
+### Changed
+- **Ideal pace is a setting** (Settings → Green reading → Ideal pace): the ball would finish 6, **8.5 (default, two cups)**, 12 or 17 in past. The aim hint, ideal line, % firm/soft, read check and "line at your pace" all follow it.
+
+
+## 2.4.2 — October 2026
+
+### Changed
+- **Ideal pace is now 6 in past the hole,** through the centre of the cup (was Pelz's ~17 in). The aim hint, ideal line, % firm/soft, read check and grades all use it. A dying pace takes more break, so ideal aim points are a little wider than before.
+- **Pace is judged by where the ball finishes:** good if holed, or if it reached the hole and finished within 1.5 ft past (5% of the putt on long ones). A ±% band doesn't work with only 6 in to spare.
+
+### Added
+- **Read and pace linked:** when the pace was off, the diagnosis gives the start line that would have holed at the pace you actually hit. Or it says that no line reaches (too soft), or that even the centre line lips out (too firm).
+
+
+## 2.4.1 — October 2026
+
+### Changed
+- **Aiming gives less away.** The full-length start line with a crossbar at the hole is replaced by a strong yellow arrow about 2 ft long from the ball, showing direction only. The aim box shows degrees ("1.25° left") instead of inches at the hole.
+- **Aim steps in degrees:** 0.25° up to 1.5°, then 0.5° up to 3°, then 1° up to 15°. Holding a button repeats every 0.15 s.
+- **Misreads in degrees plus % of break,** e.g. "Under-read 2.1° · 26% of break", with "You aimed 0.75° left; the read needed 2.9° left". Inches are gone from the read. Stats show the average gap in degrees. Older putts are converted.
+- The aim arrow is always shown; the old "Line to the hole" toggle is removed. If that toggle had been switched off, it used to hide the arrow.
+
+
 ## 2.4.0 — October 2026
 
 ### Added

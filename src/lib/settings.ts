@@ -18,7 +18,11 @@ export interface AppSettings {
   slopeExaggeration: number;
   /** Real lidar-surveyed championship greens, or generated greens. */
   greenSource: 'real' | 'generated';
+  /** Ideal pace: how far past the hole the ball would stop (inches) if it missed the cup. */
+  idealPastIn: IdealPastIn;
 }
+
+export type IdealPastIn = 6 | 8.5 | 12 | 17;
 
 export const DEFAULT_SETTINGS: AppSettings = {
   stimp: 10.5,
@@ -35,6 +39,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   speedCalibration: 1,
   slopeExaggeration: 3,
   greenSource: 'real',
+  idealPastIn: 8.5,
 };
 
 const KEY = 'squareputt_settings_v2';

@@ -115,7 +115,7 @@ export function StatsView({ shots, onDataChanged }: { shots: PuttingShotData[]; 
               </p>
               <div className="mt-4 grid grid-cols-2 gap-4 md:grid-cols-4">
                 <Tile value={`${Math.round(rs.readMakePct)}%`} label="of your reads would hole at perfect pace" />
-                <Tile value={rs.avgErrorIn >= 12 ? `${(rs.avgErrorIn / 12).toFixed(1)} ft` : `${rs.avgErrorIn.toFixed(1)} in`} label="average gap between your aim and the ideal aim" />
+                <Tile value={`${rs.avgErrorDeg.toFixed(2)}°`} label="average gap between your start direction and the ideal one" />
                 <Tile
                   value={rs.breakPlayedPct !== null ? `${Math.round(rs.breakPlayedPct)}%` : '–'}
                   label={
@@ -149,7 +149,7 @@ export function StatsView({ shots, onDataChanged }: { shots: PuttingShotData[]; 
                       </div>
                     ))}
                   </div>
-                  <p className="mt-2 text-xs text-fog">A miss can count against more than one. Start line within ~1.5 in at the hole (at least 0.5°) and pace within 8% count as good.</p>
+                  <p className="mt-2 text-xs text-fog">A miss can count against more than one. Start line within ~1.5 in at the hole (at least 0.5°) counts as good; pace is good if the ball reached the hole and finished no more than 1.5 ft past (5% of the putt on long ones).</p>
                 </div>
               )}
             </>

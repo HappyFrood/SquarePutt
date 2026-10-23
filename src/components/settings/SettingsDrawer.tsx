@@ -145,6 +145,28 @@ export function SettingsDrawer({
           </Group>
 
           <Group title="Green reading">
+            <Field label="Ideal pace — finishes past the hole">
+              <Segmented
+                value={s.idealPastIn}
+                onChange={(v) => onChange({ idealPastIn: v })}
+                options={[
+                  { value: 6, label: '6 in' },
+                  { value: 8.5, label: '8.5 in' },
+                  { value: 12, label: '12 in' },
+                  { value: 17, label: '17 in' },
+                ]}
+              />
+              <p className="text-xs text-fog">
+                {s.idealPastIn === 6
+                  ? 'Dies at the hole: widest cup, most break, least margin if short.'
+                  : s.idealPastIn === 8.5
+                  ? 'Two cups past (default): a soft pace with a little margin.'
+                  : s.idealPastIn === 12
+                  ? 'One foot past: the common tour target.'
+                  : 'Pelz: firm enough to roll through the bumpy ring around real holes.'}{' '}
+                Sets the ideal line and speed that your pace and read are judged against.
+              </p>
+            </Field>
             <Field label="Help reading the putt">
               <Segmented
                 value={s.readAssist}
@@ -168,7 +190,6 @@ export function SettingsDrawer({
               <Toggle checked={s.grid} onChange={(v) => onChange({ grid: v })} label="1 ft grid" hint="Bends with the surface to show contour" />
               <Toggle checked={s.contours} onChange={(v) => onChange({ contours: v })} label="Contour lines" hint="Lines of equal height" />
               <Toggle checked={s.heatmap} onChange={(v) => onChange({ heatmap: v })} label="Height map" hint="Red is high, blue is low" />
-              <Toggle checked={s.aimLine} onChange={(v) => onChange({ aimLine: v })} label="Start line" hint="The line you've chosen. Move it with the ◀ ▶ buttons, the arrow keys or a presentation remote." />
             </div>
           </Group>
 

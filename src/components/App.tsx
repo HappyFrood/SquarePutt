@@ -58,6 +58,9 @@ const sameLayout = (a: PuttLayout, b: PuttLayout) =>
   a.ball?.z === b.ball?.z &&
   a.greenRadiusM === b.greenRadiusM;
 
+/** Aim steps (degrees): 0.25° to 1.5°, then 0.5° to 3°, then 1° to 15°. */
+const AIM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+
 const ZONE_COLOR: Record<LagZone, string> = {
   holed: '#4fb3ff',
   zone: '#4ade80',
@@ -170,25 +173,21 @@ export default function App() {
     () => ({ surface, stimp, ball, holeRadiusMultiplier: layout.holeRadiusMultiplier, speedCalibration: settings.speedCalibration }),
     [surface, stimp, ball, layout.holeRadiusMultiplier, settings.speedCalibration]
   );
-  const ideal = useMemo(() => solveIdealStroke({ ...setup, holeRadiusMultiplier: 1 }), [setup]);
+  const idealPastM = settings.idealPastIn * 0.0254;
+  const ideal = useMemo(() => solveIdealStroke({ ...setup, holeRadiusMultiplier: 1 }, idealPastM), [setup, idealPastM]);
 
   /* ------------------------------ chosen start line ------------------------------ */
-  // Aim point at the hole, inches right (+) / left (−) of the cup; resets for every new putt.
+  // Start direction off the line to the hole, as a step on AIM_STEPS (+ right / − left);
+  // resets for every new putt.
   const ballKey = `${layout.seed}|${ball.x.toFixed(3)}|${ball.z.toFixed(3)}`;
-  const [aim, setAim] = useState({ key: ballKey, inches: 0 });
-  if (aim.key !== ballKey) setAim({ key: ballKey, inches: 0 });
+  const [aim, setAim] = useState({ key: ballKey, step: 0 });
+  if (aim.key !== ballKey) setAim({ key: ballKey, step: 0 });
   const aimLocked = settings.readAssist === 'line';
-  const distIn = Math.hypot(ball.x, ball.z) * 39.3701;
-  const aimIn = aim.key === ballKey ? aim.inches : 0;
-  const aimHlaDeg = aimLocked ? ideal.hlaDeg : (Math.atan2(aimIn, Math.max(1, distIn)) * 180) / Math.PI;
-  const nudgeAim = useCallback(
-    (dir: -1 | 1) => {
-      const step = Math.max(1, Math.round(distIn / 120)); // 1 in per 10 ft
-      const max = distIn * Math.tan((20 * Math.PI) / 180);
-      setAim((a) => ({ key: a.key, inches: Math.max(-max, Math.min(max, a.inches + dir * step)) }));
-    },
-    [distIn]
-  );
+  const aimStep = aim.key === ballKey ? aim.step : 0;
+  const aimHlaDeg = aimLocked ? ideal.hlaDeg : Math.sign(aimStep) * (AIM_STEPS[Math.abs(aimStep) - 1] ?? 0);
+  const nudgeAim = useCallback((dir: -1 | 1) => {
+    setAim((a) => ({ key: a.key, step: Math.max(-AIM_STEPS.length, Math.min(AIM_STEPS.length, a.step + dir)) }));
+  }, []);
   // Keyboard / remote: ← → arrows, or Page Up / Page Down (what presentation clickers send).
   useEffect(() => {
     if (mode === 'analytics' || aimLocked) return;
@@ -424,12 +423,11 @@ export default function App() {
             {!live && <PracticePad ideal={ideal} aimDeg={aimHlaDeg} disabled={busy || !drillPlaying} />}
             {!waitingForSetup && (
               <AimControl
-                aimIn={aimIn}
                 aimDeg={aimHlaDeg}
                 locked={aimLocked}
                 disabled={busy}
                 onNudge={nudgeAim}
-                onReset={() => setAim((a) => ({ ...a, inches: 0 }))}
+                onReset={() => setAim((a) => ({ ...a, step: 0 }))}
               />
             )}
             <BallPlacement ble={ble} active={!busy && drillPlaying} />

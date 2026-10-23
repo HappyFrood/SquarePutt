@@ -23,25 +23,53 @@ export interface Diagnosis {
   headline: string;
 }
 
-const inches = (n: number) => (Math.abs(n) >= 12 ? `${(Math.abs(n) / 12).toFixed(1)} ft` : `${Math.round(Math.abs(n))} in`);
+/** Degrees for display: 1.0°, 0.5°, 0.25° → "1°", "0.5°", "0.25°"; one decimal otherwise. */
+export const fmtDeg = (d: number) => {
+  const n = Math.abs(d);
+  return `${n >= 10 ? n.toFixed(0) : Number(n.toFixed(n < 1 ? 2 : 1)).toString()}°`;
+};
+
+/** Read numbers in degrees; older putts (stored in inches only) are converted. */
+export function readDegrees(s: PuttingShotData) {
+  const r = s.read!;
+  const distIn = Math.max(12, s.targetDistanceFt * 12);
+  const toDeg = (inch: number) => (Math.atan(inch / distIn) * 180) / Math.PI;
+  const aimDeg = r.aimDeg ?? toDeg(r.aimIn);
+  const idealDeg = r.idealDeg ?? toDeg(r.idealIn);
+  const errorDeg = r.errorDeg ?? aimDeg - idealDeg;
+  const breakPlayedPct = r.breakPlayedPct ?? (Math.abs(idealDeg) >= 0.25 ? Math.round((aimDeg / idealDeg) * 100) : undefined);
+  return { aimDeg, idealDeg, errorDeg, breakPlayedPct };
+}
+
+const side = (d: number) => (Math.abs(d) < 0.01 ? 'straight' : `${fmtDeg(d)} ${d > 0 ? 'right' : 'left'}`);
 
 /** Start-line tolerance: what moves the ball ~1.5 in at the hole, but never under 0.5°. */
 export function lineToleranceDeg(distanceFt: number) {
   return Math.max(0.5, (Math.atan(1.5 / Math.max(12, distanceFt * 12)) * 180) / Math.PI);
 }
-export const PACE_TOLERANCE_PCT = 8;
+/**
+ * Pace is judged by where the ball ends up, not a ± % band: the ideal pace (through the centre,
+ * dying 6 in past) leaves little room on the soft side. A holed putt had good pace; a miss had
+ * good pace if it got to the hole and finished no more than 1.5 ft (or 5% of the putt) past.
+ */
+export function paceIsGood(isHoled: boolean, distanceErrorFt: number, distanceFt: number) {
+  if (isHoled) return true;
+  return distanceErrorFt >= 0 && distanceErrorFt <= Math.max(1.5, distanceFt * 0.05);
+}
 
 export function diagnose(s: PuttingShotData): Diagnosis {
   const r = s.read;
-  const read: DiagPart = !r
+  const rd = r ? readDegrees(s) : null;
+  const played = rd?.breakPlayedPct !== undefined ? ` · ${rd.breakPlayedPct}% of break` : '';
+  const read: DiagPart = !r || !rd
     ? { state: 'na', text: 'Ideal line (Read + line)' }
     : r.verdict === 'good'
-    ? { state: 'good', text: Math.abs(r.idealIn) < 1 ? 'Holes at ideal pace' : `Holes · played ${inches(r.aimIn)} ${r.aimIn > 0 ? 'right' : 'left'}` }
+    ? { state: 'good', text: `Holes at perfect pace${played}` }
     : r.verdict === 'over'
-    ? { state: 'off', text: `Over-read ${inches(r.errorIn)}` }
+    ? { state: 'off', text: `Over-read ${fmtDeg(rd.errorDeg)}${played}` }
     : r.verdict === 'under'
-    ? { state: 'off', text: `Under-read ${inches(r.errorIn)}` }
-    : { state: 'off', text: `Aimed ${inches(r.errorIn)} ${r.verdict}` };
+    ? { state: 'off', text: `Under-read ${fmtDeg(rd.errorDeg)}${played}` }
+    : { state: 'off', text: `${fmtDeg(rd.errorDeg)} ${r.verdict} of the read` };
 
   const le = s.startLineErrorDeg;
   const tol = lineToleranceDeg(s.targetDistanceFt);
@@ -50,15 +78,15 @@ export function diagnose(s: PuttingShotData): Diagnosis {
       ? { state: 'na', text: '–' }
       : Math.abs(le) <= tol
       ? { state: 'good', text: 'On your line' }
-      : { state: 'off', text: `${Math.abs(le).toFixed(1)}° ${le > 0 ? 'right' : 'left'}` };
+      : { state: 'off', text: side(le) };
 
   const pe = s.speedErrorPct;
-  const pace: DiagPart =
-    pe === undefined
-      ? { state: 'na', text: '–' }
-      : Math.abs(pe) <= PACE_TOLERANCE_PCT
-      ? { state: 'good', text: 'Good pace' }
-      : { state: 'off', text: `${Math.abs(pe).toFixed(0)}% ${pe > 0 ? 'firm' : 'soft'}` };
+  const pct = pe !== undefined && Math.abs(pe) >= 1 ? `${Math.abs(pe).toFixed(0)}% ${pe > 0 ? 'firm' : 'soft'}` : 'ideal pace';
+  const pace: DiagPart = paceIsGood(s.isHoled, s.distanceErrorFt, s.targetDistanceFt)
+    ? { state: 'good', text: pe === undefined ? 'Good pace' : `Good · ${pct}` }
+    : s.distanceErrorFt < 0
+    ? { state: 'off', text: `Short · ${pct}` }
+    : { state: 'off', text: `Too firm · ${pct}` };
 
   const off = [read.state === 'off' && 'read', line.state === 'off' && 'start line', pace.state === 'off' && 'pace'].filter(Boolean) as string[];
   let headline: string;
@@ -82,9 +110,9 @@ export interface ReadStats {
   n: number;
   /** % of those whose chosen line would have holed at ideal pace. */
   readMakePct: number;
-  /** Average distance between the chosen and ideal aim points, inches. */
-  avgErrorIn: number;
-  /** Breaking putts (ideal aim ≥ 2 in off the cup). */
+  /** Average gap between the chosen and ideal start direction, degrees. */
+  avgErrorDeg: number;
+  /** Breaking putts (ideal start ≥ 0.25° off the hole). */
   breaking: number;
   underPct: number;
   overPct: number;
@@ -98,14 +126,16 @@ export function readStats(shots: PuttingShotData[]): ReadStats | null {
   const withRead = shots.filter((s) => s.read);
   if (!withRead.length) return null;
   const reads = withRead.map((s) => s.read!);
-  const breaking = reads.filter((r) => Math.abs(r.idealIn) >= 2);
-  const ratios = breaking.map((r) => Math.max(-1, Math.min(3, r.aimIn / r.idealIn))).sort((a, b) => a - b);
+  const degs = withRead.map(readDegrees);
+  const breakingIdx = degs.map((d, i) => (d.breakPlayedPct !== undefined ? i : -1)).filter((i) => i >= 0);
+  const breaking = breakingIdx.map((i) => reads[i]);
+  const ratios = breakingIdx.map((i) => Math.max(-1, Math.min(3, degs[i].breakPlayedPct! / 100))).sort((a, b) => a - b);
   const misses = withRead.filter((s) => !s.isHoled);
   const d = misses.map(diagnose);
   return {
     n: withRead.length,
     readMakePct: (reads.filter((r) => r.holesAtIdealPace).length / reads.length) * 100,
-    avgErrorIn: calculateMean(reads.map((r) => Math.abs(r.errorIn))),
+    avgErrorDeg: calculateMean(degs.map((d) => Math.abs(d.errorDeg))),
     breaking: breaking.length,
     underPct: breaking.length ? (breaking.filter((r) => r.verdict === 'under').length / breaking.length) * 100 : 0,
     overPct: breaking.length ? (breaking.filter((r) => r.verdict === 'over').length / breaking.length) * 100 : 0,

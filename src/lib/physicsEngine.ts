@@ -32,8 +32,8 @@ export const M_TO_FT = 3.28084;
 export const FT_TO_M = 0.3048;
 export const M_TO_IN = 39.3701;
 export const SAMPLE_DT = 1 / 60; // trajectory sample spacing (s)
-/** Desired "die" distance past the hole for ideal speed (Pelz: ~17 in). */
-export const IDEAL_PAST_HOLE_M = 0.43;
+/** Default ideal pace: through the centre of the cup at a speed that would stop 8.5 in (two cups) past it. User-selectable in settings. */
+export const IDEAL_PAST_HOLE_M = 8.5 * 0.0254;
 
 /** Rolling deceleration (m/s^2) implied by a stimp reading in feet. */
 export function rollingDecel(stimp: number): number {
@@ -321,6 +321,69 @@ export interface IdealStroke {
 }
 
 /**
+ * Rolls a stroke with no cup and measures how it passes the hole: the lateral miss at closest
+ * approach and the roll past the hole minus pastHoleM (negative = stopped short).
+ */
+function passAtHole(flatSetup: PuttSetup, hla: number, mph: number, pastHoleM: number) {
+  const r = simulatePutt(flatSetup, { ballSpeedMph: mph, hlaDeg: hla }, { dt: 0.002, ignoreCup: true });
+  const s = r.samples;
+  // closest approach to the hole
+  let best = Infinity;
+  let bi = 0;
+  for (let i = 0; i < s.length; i++) {
+    const d = s[i][0] * s[i][0] + s[i][2] * s[i][2];
+    if (d < best) {
+      best = d;
+      bi = i;
+    }
+  }
+  let lat: number;
+  let past: number;
+  if (bi >= s.length - 1) {
+    // stopped short: no pass; error is how far short, lateral from line to hole
+    const p = s[s.length - 1];
+    const prev = s[Math.max(0, s.length - 3)];
+    const tx = p[0] - prev[0];
+    const tz = p[2] - prev[2];
+    const tl = Math.hypot(tx, tz) || 1;
+    lat = ((tx / tl) * -p[2] - (tz / tl) * -p[0]); // cross(dir, hole - p)
+    past = -Math.sqrt(best);
+  } else {
+    const a = s[Math.max(0, bi - 1)];
+    const b = s[Math.min(s.length - 1, bi + 1)];
+    const tx = b[0] - a[0];
+    const tz = b[2] - a[2];
+    const tl = Math.hypot(tx, tz) || 1;
+    lat = (tx / tl) * -s[bi][2] - (tz / tl) * -s[bi][0];
+    past = 0;
+    for (let i = bi + 1; i < s.length; i++) {
+      past += Math.hypot(s[i][0] - s[i - 1][0], s[i][2] - s[i - 1][2]);
+    }
+  }
+  return { lat, past: past - pastHoleM, samples: s };
+}
+
+/**
+ * The start line that sends the ball through the centre of the cup at a GIVEN speed (the player's
+ * actual pace). Null if no line reaches the hole at that speed.
+ */
+export function solveLineForSpeed(setup: PuttSetup, mph: number, startHla = 0): number | null {
+  const flat = { ...setup, speedCalibration: 1 };
+  let h = startHla;
+  let r = passAtHole(flat, h, mph, 0);
+  for (let i = 0; i < 20; i++) {
+    if (Math.abs(r.lat) < 0.004) break;
+    const dh = 0.05;
+    const r2 = passAtHole(flat, h + dh, mph, 0);
+    const slope = (r2.lat - r.lat) / dh;
+    if (Math.abs(slope) < 1e-9) break;
+    h = Math.max(-25, Math.min(25, h - Math.max(-4, Math.min(4, r.lat / slope))));
+    r = passAtHole(flat, h, mph, 0);
+  }
+  return Math.abs(r.lat) < 0.01 && r.past >= -0.02 ? h : null;
+}
+
+/**
  * Finds the start line and ball speed that send the ball through the centre of the cup
  * and, if the cup weren't there, stop IDEAL_PAST_HOLE_M past it.
  */
@@ -328,44 +391,7 @@ export function solveIdealStroke(setup: PuttSetup, pastHoleM = IDEAL_PAST_HOLE_M
   const { dist } = frame(setup.ball);
   const flatSetup = { ...setup, speedCalibration: 1 };
 
-  const evaluate = (hla: number, mph: number) => {
-    const r = simulatePutt(flatSetup, { ballSpeedMph: mph, hlaDeg: hla }, { dt: 0.002, ignoreCup: true });
-    const s = r.samples;
-    // closest approach to the hole
-    let best = Infinity;
-    let bi = 0;
-    for (let i = 0; i < s.length; i++) {
-      const d = s[i][0] * s[i][0] + s[i][2] * s[i][2];
-      if (d < best) {
-        best = d;
-        bi = i;
-      }
-    }
-    let lat: number;
-    let past: number;
-    if (bi >= s.length - 1) {
-      // stopped short: no pass; error is how far short, lateral from line to hole
-      const p = s[s.length - 1];
-      const prev = s[Math.max(0, s.length - 3)];
-      const tx = p[0] - prev[0];
-      const tz = p[2] - prev[2];
-      const tl = Math.hypot(tx, tz) || 1;
-      lat = ((tx / tl) * -p[2] - (tz / tl) * -p[0]); // cross(dir, hole - p)
-      past = -Math.sqrt(best);
-    } else {
-      const a = s[Math.max(0, bi - 1)];
-      const b = s[Math.min(s.length - 1, bi + 1)];
-      const tx = b[0] - a[0];
-      const tz = b[2] - a[2];
-      const tl = Math.hypot(tx, tz) || 1;
-      lat = (tx / tl) * -s[bi][2] - (tz / tl) * -s[bi][0];
-      past = 0;
-      for (let i = bi + 1; i < s.length; i++) {
-        past += Math.hypot(s[i][0] - s[i - 1][0], s[i][2] - s[i - 1][2]);
-      }
-    }
-    return { lat, past: past - pastHoleM, samples: s };
-  };
+  const evaluate = (hla: number, mph: number) => passAtHole(flatSetup, hla, mph, pastHoleM);
 
   let hla = 0;
   let mph = speedForFlatDistanceMph((dist + pastHoleM) * M_TO_FT, setup.stimp);

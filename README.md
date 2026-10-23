@@ -105,22 +105,23 @@ The Square measures the ball, not the putter, so SquarePutt shows no face or pat
 
 When you choose your own start line, every putt is split into its three parts, with a one-line verdict ("Misread", "Pace cost it", "Holed — read, line and pace all good"):
 
-- **Read:** SquarePutt rolls *your* chosen line at perfect pace. If it drops, the read was good; if not, it says by how much you under-read or over-read the break (or aimed left/right on a straight putt), and where your line would have finished.
+- **Read:** SquarePutt rolls *your* chosen line at perfect pace. If it drops, the read was good. If not, it says by how many degrees you under-read or over-read (or how far left/right of a straight putt you aimed) and what share of the break you played: "Under-read 2.1° · 26% of break". Degrees match the aim control; the percentage reads the same at any distance and is the usual coaching measure (most golfers play well under half the real break).
 - **Start line:** good within ~1.5 in at the hole (never stricter than 0.5°).
-- **Pace:** good within 8% of the ideal speed.
+- **Pace:** judged by where the ball ends up. Holed, or it reached the hole and finished no more than 1.5 ft past (5% of the putt on long ones). Shown with % firm/soft against the ideal pace.
+- **Read and pace are linked:** a firmer putt needs less break, a softer one more. When the pace was off, the diagnosis says which line would have holed *at the pace you hit*, that even the centre line lips out at that pace, or that no line reaches.
 
 The overall grade includes the read. With **Read + line** on, the read isn't tested: you're putting on the ideal line.
 
 **Stats → Green reading** collects this over time:
 - how often your reads would hole at perfect pace
-- the average gap between your aim and the ideal aim
+- the average gap between your start direction and the ideal one, in degrees
 - how much of the break you play on breaking putts (100% = the ideal amount)
 - how often you under-read vs over-read
 - what cost your misses (read, start line, pace).
 
 ### Choosing your start line
 
-Before each putt, pick the line you intend to start the ball on. Tap **◀ ▶** (bottom right of the green), press the **← →** arrow keys, or use a presentation remote (its **Page Up / Page Down** buttons). Each press moves the aim point at the hole by 1 inch per 10 ft of putt; hold a button to keep moving, and tap the label to reset to the hole. The start line on the green swings to match. Start-line results, the trend and drill spreads are then measured against this line, so you're grading your stroke, not your read. With **Help reading the putt → Read + line**, the start line is locked to the ideal line and the controls are disabled.
+Before each putt, pick the direction you intend to start the ball. Tap **◀ ▶** (bottom right of the green), press the **← →** arrow keys, or use a presentation remote (its **Page Up / Page Down** buttons). Steps are 0.25° up to 1.5°, then 0.5° up to 3°, then 1° up to 15°. Hold a button to keep moving, and tap the readout to go back to straight at the hole. The box shows only the angle (e.g. "1.25° left"), and the green shows a short (~2 ft) yellow arrow from the ball. Neither gives away where your line meets the hole, so the read stays yours. Start-line results, the trend and drill spreads are then measured against this line, so you're grading your stroke, not your read. With **Help reading the putt → Read + line**, the start line is locked to the ideal line and the controls are disabled.
 
 Grades use the Quintic-style tiers: **Eagle** (tour level), **Birdie**, **Par**, **Bogey**.
 
@@ -135,7 +136,7 @@ Based on Penner, *The physics of putting* (Can. J. Phys., 2002) and Holmes (1991
 - **Roll:** constant rolling resistance from the Stimpmeter definition (the USGA ramp releases a rolling ball at 1.83 m/s, which rolls *S* ft). On slopes, gravity acts fully on a sliding ball and at 5/7 strength on a rolling ball.
 - **Cup:** a ball falls in if it drops a ball-radius while its centre crosses the hole: max speed ≈ 1.63 m/s dead centre, much less near the edge. Faster balls lip out (deflected) or hop the cup.
 - **Calibration:** on flat ground this gives ~0.39 ft per mph² at stimp 10 (e.g. 9 mph → ~31 ft), matching measured launch-monitor putting data. A **ball speed calibration** setting (85–115%) lets you match your monitor to a real green.
-- **Ideal stroke:** a solver finds the start line and speed that send the ball through the centre of the cup and, without the cup, ~17 in past. It drives the aim hint, the optional ideal line, and the "% firm" and "° right of ideal" feedback.
+- **Ideal stroke:** a solver finds the start line and speed that send the ball through the centre of the cup and, without the cup, a set distance past: **8.5 in (two cups) by default**, or 6, 12 or 17 in under Settings → Green reading → Ideal pace. Softer pace means a wider effective cup and more break. Firmer pace means less break, and more margin against bumps and coming up short: Pelz's 17 in is meant to roll through the bumpy ring around real holes, and about 12 in is the common tour target. It drives the aim hint, the optional ideal line, and the "% firm" and "° right of ideal" feedback.
 
 Putts play back in real time — a 40 ft lag takes several seconds, as on a real green.
 
@@ -185,7 +186,7 @@ Plain Three.js, kept lightweight: one terrain mesh, a sky, a distant treeline. A
 - **1 ft grid:** bends with the surface
 - **Contour lines:** lines of equal height
 - **Height map:** red high, blue low
-- **Start line** (the line you chose, with a crossbar at hole distance) and **ideal line**
+- **Aim arrow** (a short yellow arrow from the ball in your chosen start direction; always shown) and **ideal line**
 
 Cameras: behind the ball, follow, overhead, and free (drag to rotate, scroll to zoom).
 

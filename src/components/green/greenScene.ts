@@ -469,6 +469,36 @@ vec3 spEmit = vec3(0.0);
     return this.surface.height(x, z) * this.exag;
   }
 
+  /** Flat arrow draped on the green, starting just in front of the ball, pointing along (dx, dz). */
+  private aimArrow(dx: number, dz: number) {
+    const start = 0.05; // m from ball centre
+    const total = 0.61; // ~2 ft
+    const headLen = 0.11;
+    const shaftHalf = 0.0125;
+    const headHalf = 0.04;
+    const px = dz; // perpendicular (right of travel)
+    const pz = -dx;
+    const at = (u: number, v: number) => this.drape(this.ball.x + dx * u + px * v, this.ball.z + dz * u + pz * v, 0.005);
+    const pos: number[] = [];
+    const push = (...vs: THREE.Vector3[]) => vs.forEach((p) => pos.push(p.x, p.y, p.z));
+    const shaftEnd = start + total - headLen;
+    const n = 16; // segments so the shaft follows the surface
+    for (let i = 0; i < n; i++) {
+      const u0 = start + ((shaftEnd - start) * i) / n;
+      const u1 = start + ((shaftEnd - start) * (i + 1)) / n;
+      const a = at(u0, -shaftHalf), b = at(u0, shaftHalf), c = at(u1, shaftHalf), e = at(u1, -shaftHalf);
+      push(a, b, c, a, c, e);
+    }
+    push(at(shaftEnd, -headHalf), at(shaftEnd, headHalf), at(start + total, 0));
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    const m = new THREE.MeshBasicMaterial({ color: '#facc15', side: THREE.DoubleSide, transparent: true, opacity: 0.95, depthWrite: false, toneMapped: false });
+    const mesh = new THREE.Mesh(g, m);
+    mesh.renderOrder = 5;
+    mesh.userData.ownMaterial = true;
+    return mesh;
+  }
+
   private drape(x: number, z: number, lift = 0.003) {
     return toThree(x, this.hh(x, z) + lift, z);
   }
@@ -791,11 +821,13 @@ vec3 spEmit = vec3(0.0);
       if (!keep.has(c)) {
         this.overlayGroup.remove(c);
         (c as THREE.Mesh).geometry?.dispose();
+        if (c.userData.ownMaterial) ((c as THREE.Mesh).material as THREE.Material).dispose();
       }
     }
-    if (this.overlays.aimLine) {
-      // The chosen start line: from the ball, rotated aimDeg (+ = right) off the line to the hole,
-      // as long as the putt, with a short crossbar at its end.
+    {
+      // Always shown (it's how the player aims). The chosen start direction: a short, strong yellow arrow (~2 ft) from the ball, rotated
+      // aimDeg (+ = right) off the line to the hole. Deliberately short so it shows direction
+      // only, not where it points at the hole.
       const d = Math.hypot(this.ball.x, this.ball.z) || 1;
       const fx = -this.ball.x / d;
       const fz = -this.ball.z / d;
@@ -804,18 +836,7 @@ vec3 spEmit = vec3(0.0);
       const th = (this.aimDeg * Math.PI) / 180;
       const dx = fx * Math.cos(th) + rx * Math.sin(th);
       const dz = fz * Math.cos(th) + rz * Math.sin(th);
-      const pts: THREE.Vector3[] = [];
-      const n = 60;
-      for (let i = 0; i <= n; i++) {
-        const t = (i / n) * d;
-        pts.push(this.drape(this.ball.x + dx * t, this.ball.z + dz * t, 0.004));
-      }
-      this.overlayGroup.add(this.fat(pts, '#7dd3fc', 2, 0.85, true));
-      const ex = this.ball.x + dx * d;
-      const ez = this.ball.z + dz * d;
-      const bar = 0.06;
-      const cross = [-1, 1].map((k) => this.drape(ex + dz * bar * k, ez - dx * bar * k, 0.004));
-      this.overlayGroup.add(this.fat(cross, '#7dd3fc', 3, 0.95));
+      this.overlayGroup.add(this.aimArrow(dx, dz));
     }
   }
 

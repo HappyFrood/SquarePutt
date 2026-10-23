@@ -8,7 +8,8 @@
 
 import { RawOpenConnectPacket, PuttingShotData, ConnectionState, AppMode, PuttLayout, ReadCheck } from './types';
 import { NormalizedStroke, telemetrySanitizer } from './dataSanitizer';
-import { IdealStroke, PuttSetup, simulatePutt, MPH_TO_MPS } from './physicsEngine';
+import { IdealStroke, PuttSetup, simulatePutt, solveLineForSpeed, MPH_TO_MPS } from './physicsEngine';
+import { paceIsGood } from './diagnosis';
 import { gradeFaceAngle, gradePutterPath, analyzeDynamicLoft, gradeSpeedError } from './calculations';
 import { QuinticGrade } from './types';
 
@@ -198,13 +199,16 @@ class OpenConnectService {
       const idealIn = ctx.ideal.aimOffsetIn;
       const errorIn = aimIn - idealIn;
       const rs = simulatePutt({ ...ctx.setup, speedCalibration: 1 }, { ballSpeedMph: ctx.ideal.ballSpeedMph, hlaDeg: aim }, { dt: 0.002 });
+      const idealDeg = ctx.ideal.hlaDeg;
+      const errorDeg = aim - idealDeg;
+      const breaking = Math.abs(idealDeg) >= 0.25; // the smallest aim step
       const verdict: ReadCheck['verdict'] = rs.isHoled
         ? 'good'
-        : Math.abs(idealIn) < 1
-        ? errorIn > 0
+        : !breaking
+        ? errorDeg > 0
           ? 'right'
           : 'left'
-        : errorIn * Math.sign(idealIn) > 0
+        : errorDeg * Math.sign(idealDeg) > 0
         ? 'over'
         : 'under';
       read = {
@@ -214,7 +218,22 @@ class OpenConnectService {
         holesAtIdealPace: rs.isHoled,
         missIn: Number((rs.lateralErrorIn ?? 0).toFixed(1)),
         verdict,
+        aimDeg: Number(aim.toFixed(2)),
+        idealDeg: Number(idealDeg.toFixed(2)),
+        errorDeg: Number(errorDeg.toFixed(2)),
+        breakPlayedPct: breaking ? Math.round((aim / idealDeg) * 100) : undefined,
+        // Read and pace are linked: if the pace was off, which line would have holed at THAT pace?
+        paceLineDeg:
+          !paceIsGood(sim.isHoled, sim.distanceErrorFt, Math.hypot(ctx.setup.ball.x, ctx.setup.ball.z) * 3.28084)
+            ? (() => {
+                const h = solveLineForSpeed(ctx.setup, effSpeed, idealDeg);
+                return h === null ? null : Number(h.toFixed(2));
+              })()
+            : undefined,
       };
+      if (typeof read.paceLineDeg === 'number') {
+        read.paceLineHoles = simulatePutt({ ...ctx.setup, speedCalibration: 1 }, { ballSpeedMph: effSpeed, hlaDeg: read.paceLineDeg }, { dt: 0.002 }).isHoled;
+      }
     }
 
     // Start line is graded against the line the player chose (the ideal one with "Read + line").

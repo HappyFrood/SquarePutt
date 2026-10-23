@@ -84,6 +84,16 @@ export interface ReadCheck {
   /** Where the ball finishes on the player's line at ideal pace, inches right (+) / left of the hole. */
   missIn: number;
   verdict: 'good' | 'over' | 'under' | 'left' | 'right';
+  /** Chosen and ideal start direction, degrees off the line to the hole (+ right), and the gap. */
+  aimDeg?: number;
+  idealDeg?: number;
+  errorDeg?: number;
+  /** Share of the break played (100 = ideal); only on breaking putts (ideal ≥ 0.25° off the hole). */
+  breakPlayedPct?: number;
+  /** When pace was off: the start line that would have holed at the pace actually hit (deg, + right); null = that pace couldn't reach. */
+  paceLineDeg?: number | null;
+  /** Whether that line actually drops at that pace (false = too fast to hold even through the centre). */
+  paceLineHoles?: boolean;
 }
 
 export interface PuttingShotData {
