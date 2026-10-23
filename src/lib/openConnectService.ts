@@ -215,6 +215,7 @@ class OpenConnectService {
       faceAngleDeg: s.faceAngleDeg,
       faceToPathDeg: Number((s.faceAngleDeg - s.pathDeg).toFixed(2)),
       dynamicLoftDeg: s.dynamicLoftDeg,
+      clubMeasured: s.hasClubData,
       stimpSetting: ctx.setup.stimp,
       slopeDifficulty: ctx.layout.difficulty,
       greenSeed: ctx.layout.seed,

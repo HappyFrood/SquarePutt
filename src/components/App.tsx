@@ -8,6 +8,7 @@ import { GreenSurface, PuttingSurface, readPutt } from '@/lib/green';
 import { GreenLibrary, loadGreenLibrary, pickRealGreen, placeBallOnGreen, RealGreenSurface } from '@/lib/realGreens';
 import { PuttSetup, solveIdealStroke } from '@/lib/physicsEngine';
 import { openConnectService } from '@/lib/openConnectService';
+import { squareBle, SquareStatus } from '@/lib/squareBle';
 import { getStoredShots, saveShotToHistory, getDrillBests, updateDrillBests } from '@/lib/storage';
 import {
   DrillEvent,
@@ -39,6 +40,7 @@ import { PuttingGreenCanvas } from '@/components/green/PuttingGreenCanvas';
 import { MarkerSpec, RingSpec } from '@/components/green/greenScene';
 import { ReadChip, ResultBanner, PracticePad } from '@/components/hud/CanvasHud';
 import { LastPutt } from '@/components/hud/LastPutt';
+import { BallPlacement } from '@/components/hud/BallPlacement';
 import { PressurePanel, LagPanel, ScramblePanel } from '@/components/drills/DrillPanels';
 import { SettingsDrawer } from '@/components/settings/SettingsDrawer';
 import { ConnectionDrawer } from '@/components/settings/ConnectionDrawer';
@@ -106,6 +108,7 @@ export default function App() {
 
   const [conn, setConn] = useState<ConnectionState>(openConnectService.getState());
   const [library, setLibrary] = useState<GreenLibrary | null>(null);
+  const [ble, setBle] = useState<SquareStatus>(squareBle.status);
   useEffect(() => {
     let alive = true;
     loadGreenLibrary().then((lib) => alive && setLibrary(lib));
@@ -249,6 +252,8 @@ export default function App() {
   useEffect(() => {
     openConnectService.connect();
     const u1 = openConnectService.subscribeConnection(setConn);
+    const ub1 = squareBle.onStatus(setBle);
+    const ub2 = squareBle.onShot((packet) => openConnectService.processPacket(packet, 'live'));
     const u2 = openConnectService.subscribeShot((s) => handleShotRef.current(s));
     let t: ReturnType<typeof setTimeout> | null = null;
     const u3 = openConnectService.subscribeFilter((reason) => {
@@ -261,6 +266,8 @@ export default function App() {
       u1();
       u2();
       u3();
+      ub1();
+      ub2();
       if (t) clearTimeout(t);
       pending.forEach(clearTimeout);
     };
@@ -294,7 +301,10 @@ export default function App() {
   );
   const outline = useMemo(() => ({ anchor: layout.anchor, radiusM: layout.greenRadiusM }), [layout.anchor, layout.greenRadiusM]);
   const recent = useMemo(() => shots.filter((s) => s.mode === mode).slice(0, 10), [shots, mode]);
-  const live = conn.connected && conn.launchMonitorConnected;
+  const live = (conn.connected && conn.launchMonitorConnected) || ble.connected;
+  useEffect(() => {
+    if (ble.connected) squareBle.setGreenSpeed(stimp);
+  }, [ble.connected, stimp]);
 
   const drillPanel =
     mode === 'pressure-circle' ? (
@@ -336,7 +346,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col">
-      <TopBar mode={mode} onMode={switchMode} connection={conn} onOpenConnection={() => setConnOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
+      <TopBar mode={mode} onMode={switchMode} connection={conn} ble={ble} onOpenConnection={() => setConnOpen(true)} onOpenSettings={() => setSettingsOpen(true)} />
 
       {mode === 'analytics' ? (
         <main className="min-h-0 flex-1">
@@ -377,6 +387,7 @@ export default function App() {
               <div className="absolute right-4 top-4 z-10 max-w-xs rounded-xl bg-club-950/90 px-4 py-2 text-sm text-mist ring-1 ring-line">{filterNote}</div>
             )}
             {!live && <PracticePad ideal={ideal} disabled={busy || !drillPlaying} />}
+            <BallPlacement ble={ble} active={!busy && drillPlaying} />
           </div>
 
           <aside className="w-[400px] shrink-0 space-y-4 overflow-y-auto border-l border-line bg-club-950 p-4">
@@ -395,7 +406,7 @@ export default function App() {
         onNewGreen={() => patch({ practiceSeed: settings.practiceSeed + 1 })}
         realGreensAvailable={!!library}
       />
-      <ConnectionDrawer open={connOpen} onClose={() => setConnOpen(false)} state={conn} />
+      <ConnectionDrawer open={connOpen} onClose={() => setConnOpen(false)} state={conn} ble={ble} />
     </div>
   );
 }

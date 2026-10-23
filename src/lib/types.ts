@@ -93,6 +93,8 @@ export interface PuttingShotData {
   faceAngleDeg: number;
   faceToPathDeg: number;
   dynamicLoftDeg: number;
+  /** False when the monitor sent no face/path: face is then estimated from start line, path unknown. */
+  clubMeasured?: boolean;
 
   // Setup
   stimpSetting: number;

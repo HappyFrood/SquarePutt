@@ -10,7 +10,7 @@ Built with Next.js (App Router), TypeScript, Three.js and Tailwind CSS. Runs in 
 
 ## Getting started
 
-Requires Node.js 18+ (tested on 22).
+Requires Node.js 18+ (tested on 22). Run in Chrome or Edge for Bluetooth.
 
 ```bash
 npm install
@@ -19,16 +19,35 @@ npm run dev            # open http://localhost:3000
 
 No launch monitor? Use **Hit a virtual putt** (bottom-left of the green) to play every mode with simulated strokes.
 
-### Connecting your Square
+### Connecting your Square (Bluetooth, no extra software)
 
-GSPro Open Connect connectors dial *into* a server on port 921. A web page can't be that server, so SquarePutt ships a small bridge that plays GSPro's part and relays shots to the app.
+Use **Chrome or Edge** on your laptop (Mac, Windows or ChromeOS). Web Bluetooth is not available in Safari or Firefox.
 
-1. **Close GSPro** (only one program can use port 921).
-2. In a second terminal: `npm run bridge`
-3. In your Square Golf software / GSPro connector, choose GSPro as the simulator as you normally would. The bridge accepts the connection, tells the monitor a putter is selected (so it switches to putting mode), and forwards every putt.
-4. The status pill in the top bar turns green when the monitor is connected.
+1. Turn the Square on. Close the Square app / GSPro connector on other devices — the monitor talks to one app at a time.
+2. In SquarePutt, click the status pill in the top bar → **Connect Square**, and pick `SquareGolf(…)` from the browser's list.
+3. SquarePutt selects the putter (which puts the monitor in putting mode), arms ball detection and keeps the link alive. The top bar shows when a ball is detected and ready. Putt.
+4. Place the ball using the guide in the top-right corner. The dot is where the Square sees the ball; the green box is its read zone, learned from the Square's own readings. When the ball is set, you hear a ding and the guide fades.
 
-Bridge options: `npm run bridge -- --gspro-port 921 --ws-port 9210 --handed LH --verbose`. The bridge has no dependencies and logs every shot it receives — check its window first if putts don't appear.
+The Square decides its own read zone and its LED colour; SquarePutt can show the zone but can't move it. The zone differs by model: the ball sits about 5 cm (2 in) in front of an Omni but about 23 cm (9 in) in front of a Home Edition, and the Home Edition's zone is smaller. Pick your model in the guide to see the right placement. At the edge of the zone the Square flickers between ready and not ready, so SquarePutt waits for 0.4 s of steady "ready" before calling the ball set.
+
+How it works: SquarePutt speaks the Square's Bluetooth protocol directly (`src/lib/squareBle.ts`). The two models share a Bluetooth service but use different message dialects.
+
+- **Home Edition** follows [squaregolf-connector](https://github.com/brentyates/squaregolf-connector):
+  - commands are prefixed `0x11`
+  - the putter code is `01 07`
+  - the shot capacitor's charge is polled until it reports charged
+  - ball speed, launch and direction are read. Club metrics are requested after each putt, but in putter mode the Home Edition reports none (its reply's validity byte is 0). Set **Read putts as → Wedge** in the launch monitor panel to have the Square treat putts as wedge shots, which asks it for club data. You still just putt. Valid face and path are shown, and the setting is remembered. This is experimental: path needs the Square's reflective club sticker, and very slow putts may not register.
+  - the device state is in byte 3 of `11 03` (byte 2 is a counter), as seen on real hardware.
+- **Omni** follows [allsquare](https://github.com/divotmaker/allsquare) (MIT/Apache-2.0):
+  - the putter code is `01 03`
+  - units are set on connect
+  - path, face, attack, loft and club speed are requested after each putt.
+
+The model is detected from the Square's advertisement when Chrome allows it. Otherwise, set it with the Home Edition / Omni switch in the launch monitor panel; the default is Home Edition. SquarePutt re-arms the Square about a second after each putt, and again if it reports idle, so you can putt continuously without reconnecting. If putts aren't read, the panel's **Test arming** button and raw message log show what the monitor answers to. Not affiliated with or endorsed by Square Golf.
+
+### Other launch monitors (GSPro connector bridge)
+
+For other GSPro-compatible monitors: close GSPro, run `npm run bridge` in a second terminal, and connect the monitor's GSPro connector as usual. The bridge plays GSPro's part on 127.0.0.1:921, selects the putter, and relays shots to the app on ws://127.0.0.1:9210. Options: `npm run bridge -- --gspro-port 921 --ws-port 9210 --handed LH --verbose`.
 
 ### Scripts
 
@@ -36,7 +55,7 @@ Bridge options: `npm run bridge -- --gspro-port 921 --ws-port 9210 --handed LH -
 |---|---|
 | `npm run dev` | Development server |
 | `npm run build` / `npm start` | Production build / serve |
-| `npm run bridge` | Launch monitor bridge (TCP 921 → WebSocket 9210) |
+| `npm run bridge` | Bridge for GSPro-connector monitors (TCP 921 → WebSocket 9210) |
 | `npm run lint` | ESLint |
 | `npm run check:physics` | Prints physics calibration, green slope statistics and aim-solver results |
 
@@ -139,7 +158,7 @@ Slope at the hole is capped to what superintendents use for that green speed (ab
 ### Graphics (`src/components/green/greenScene.ts`)
 Plain Three.js, kept lightweight: one terrain mesh, a sky, a distant treeline. A low sun rakes across the green so slopes catch light and shadow. A small shader on the terrain draws the green edge, mowing stripes, and the optional overlays without extra geometry:
 
-- **Slope lines** (as in the Square app): the slope is split into its two parts and shown on the 1 ft grid. Lines running across the putt flow with the left/right slope; lines running toward the hole flow with the uphill/downhill slope. Faster, brighter and warmer (blue → yellow → red at 3%+) means steeper; you combine the two yourself
+- **Slope arrows** (as in the Square app): the slope is split into its two parts and shown on the 1 ft grid. Each grid edge carries one small arrow that slides from one grid crossing to the next in the downhill direction along that edge; edges across the putt show the left/right slope, edges toward the hole the uphill/downhill slope, so you combine the two to find the fall line. Steeper edges move their arrow faster, at a calm 0.1–0.6 grid edges per second. Slope is averaged over ~1.5 m, and edges under 0.5% show no arrow
 - **Show slopes:** on-screen height exaggeration (true, 2×, 3× default, 5×). Real greens rarely tilt more than 3°, which looks flat on a screen; this raises the shape for display only — the ball always rolls on the true-scale green
 - **1 ft grid:** bends with the surface
 - **Contour lines:** lines of equal height
@@ -179,7 +198,7 @@ src/lib/                         Physics, greens, drills, scoring, storage, conn
 Everything is stored in your browser's local storage (settings, last 1,000 putts, personal bests). Use **Stats → Export** to back up or move to another computer.
 
 ## Known limitations
-- Live play with a Square has been verified against the GSPro protocol with a simulated connector, not yet with Square hardware.
+- Direct Bluetooth: Home Edition per squaregolf-connector, Omni per allsquare. Tested here with simulated packets; Home Edition connection, ball detection and the ready flag confirmed on real hardware, and putt reading with the `01 07` code awaits confirmation.
 - Fonts load from Google Fonts; offline, a system font is used.
 - No cloud accounts or sync yet (the spec's PostgreSQL profiles are not built).
 - Real greens use public lidar, which can't capture features smaller than about 1 m and may predate recent green rebuilds.

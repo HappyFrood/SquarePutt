@@ -1,5 +1,69 @@
 # Changelog
 
+## 2.3.3 — October 2026
+
+### Fixed (from a real Home Edition log)
+- **Device state:** status messages carry the state in byte 3 (byte 2 is a counter): `11 03 <ctr> <state> <state> 07 01 00 01`. SquarePutt was reading byte 2, so the panel never showed ready/detecting and the re-arm-on-idle backstop couldn't fire.
+- **Club data:** the club reply's byte 2 is a validity mask on the Home Edition too, and `ffff` means blank. In putter mode the Home Edition answers `11 07 00 ffff…`, i.e. nothing measured. SquarePutt now treats this as no club data instead of showing near-zero values.
+
+### Added
+- **Read putts as Putter / Wedge** (launch monitor panel, remembered). Wedge tells the Square you're holding a sand wedge (Home `0c 06`, Omni `0c 02`) so it reports club data. Putt as normal: valid face and path go to the impact panel, and blank values are ignored. It's an experiment: path needs the club sticker, and very slow putts may not register.
+
+## 2.3.2 — October 2026
+
+### Added
+- **Club data from the Home Edition (experimental).** After each putt SquarePutt now asks the Home Edition for club metrics (path, face, attack angle, dynamic loft) and uses them unless they're empty markers. squaregolf-connector discards these for the putter, so how good they are on putts is unconfirmed. Path and attack angle need the Square's reflective club sticker; face is the device's estimate. The raw reply appears in the launch monitor log.
+
+### Changed
+- When no club data arrives, the impact panel says so: face is labelled "Face (est.)" (estimated from start line) and path shows "not measured", with no path arrow, instead of a made-up 0°.
+
+## 2.3.1 — October 2026
+
+### Fixed
+- **Only one putt per connection.** After a putt, the Square leaves detection mode and waits to be re-armed. SquarePutt now re-arms it about 1.2 s after each putt, and whenever the Square reports idle or done, so you no longer need to disconnect and reconnect.
+- **Slope arrows breaking up over time or after switching windows.** The arrow clock was the page's uptime, so small speed differences along an edge drifted apart, and returning to the window made the clock jump. The clock now advances by the capped frame time and wraps every 20 s. Arrow speeds are set in steps that all repeat within that period, so the arrows stay crisp however long the page is open.
+
+### Changed
+- Slope arrows move at half their previous speed (0.1–0.6 grid edges per second).
+
+## 2.3.0 — October 2026
+
+### Changed
+- **Home Edition support.** SquarePutt had been speaking the Omni's dialect, from allsquare, to every Square. It now follows squaregolf-connector's Home Edition protocol when the model is Home Edition:
+  - commands start with `0x11`
+  - the putter code is `01 07` (`01 03` is the Omni's)
+  - device state is read from byte 2 of the status message
+  - the shot capacitor's charge is polled until it reports charged
+  - the Omni-only units and green-speed commands are no longer sent
+  - putts are passed on straight away, without waiting for club data the Home Edition doesn't send.
+- **Model detection and switch.** The model is detected from the Square's Bluetooth advertisement when Chrome allows it. Otherwise it comes from a Home Edition / Omni switch (default Home Edition) in the launch monitor panel and the placement guide.
+- The arming test now compares the Home Edition and Omni putter codes. The custom putter code field defaults to the model's own code.
+
+## 2.2.1 — October 2026
+
+### Added
+- **Ball placement guide**: a small top-right panel shows the ball position reported by the Square, the read zone learned from its own readings, and an arrow toward the zone. Plays a ding and fades once the ball is set. A Home Edition / Omni switch shows where the ball goes for each model (about 23 cm vs 5 cm in front of the unit).
+- **Test arming** in the launch monitor panel tries several club codes and reports what the Square does with each.
+
+### Fixed
+- **Brief green flashes in odd places on the Home Edition.** The Home Edition's read zone is much smaller than the Omni's (about 6×6 in versus 10×10 in), so a ball at its edge flickers between ready and not ready. SquarePutt now treats the ball as ready only after the Square has reported ready steadily for 0.4 s. Flickers no longer trigger the ding or "Ready", and only steady readings teach the zone. The zone is relearned from scratch (old samples are discarded).
+
+
+## 2.2.0 — October 2026
+
+### Added
+- **Direct Bluetooth connection to the Square** from Chrome/Edge on a laptop (Connect Square in the launch monitor panel): selects the putter, arms detection, heartbeats, reads ball and club data. No bridge, connector or GSPro needed. Protocol from the open-source allsquare project. Adjustable putter code and raw message log for Home Edition diagnosis. The GSPro bridge remains for other monitors.
+
+### Changed
+- Slope arrows are now small (about 2 cm), a single soft green-white colour, and exactly one per 1 ft grid edge, sliding crossing to crossing (speed shows steepness).
+- Follow camera keeps the ball in frame at address.
+- Slope arrows use slope averaged over ~1.5 m and appear only above 0.5%, so small bumps no longer flip neighbouring arrows in opposite directions.
+
+## 2.1.1 — October 2026
+
+### Changed
+- Slope lines redrawn as bright, self-lit **arrowheads** on the 1 ft grid that point and move steadily downhill along each axis (constant size, speed proportional to slope), with the grid line tinted by steepness. Replaces the dim dashes whose direction was hard to read.
+
 ## 2.1.0 — October 2026
 
 ### Added

@@ -179,7 +179,7 @@ export function SettingsDrawer({
               </p>
             </Field>
             <div className="divide-y divide-line/60">
-              <Toggle checked={s.fallLines} onChange={(v) => onChange({ fallLines: v })} label="Slope lines" hint="Grid lines flow downhill: across-the-line slope on one set, up/down on the other. Faster and warmer = steeper." />
+              <Toggle checked={s.fallLines} onChange={(v) => onChange({ fallLines: v })} label="Slope lines" hint="A small arrow on each grid edge slides downhill along that edge — combine the two directions to find the fall line. Steeper slopes move faster." />
               <Toggle checked={s.grid} onChange={(v) => onChange({ grid: v })} label="1 ft grid" hint="Bends with the surface to show contour" />
               <Toggle checked={s.contours} onChange={(v) => onChange({ contours: v })} label="Contour lines" hint="Lines of equal height" />
               <Toggle checked={s.heatmap} onChange={(v) => onChange({ heatmap: v })} label="Height map" hint="Red is high, blue is low" />

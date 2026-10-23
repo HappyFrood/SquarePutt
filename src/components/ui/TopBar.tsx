@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { AppMode, ConnectionState } from '@/lib/types';
+import { SquareStatus } from '@/lib/squareBle';
 import { audioEngine } from './AudioEngine';
 import { Maximize, Minimize, Settings2, Volume2, VolumeX } from 'lucide-react';
 
@@ -17,12 +18,14 @@ export function TopBar({
   mode,
   onMode,
   connection,
+  ble,
   onOpenConnection,
   onOpenSettings,
 }: {
   mode: AppMode;
   onMode: (m: AppMode) => void;
   connection: ConnectionState;
+  ble: SquareStatus;
   onOpenConnection: () => void;
   onOpenSettings: () => void;
 }) {
@@ -34,8 +37,12 @@ export function TopBar({
     return () => document.removeEventListener('fullscreenchange', h);
   }, []);
 
-  const live = connection.connected && connection.launchMonitorConnected;
-  const status = live
+  const live = (connection.connected && connection.launchMonitorConnected) || ble.connected;
+  const status = ble.connected
+    ? `${ble.deviceName ?? 'Square'} · ${ble.ballReady ? 'ball ready' : ble.ballDetected ? 'ball detected' : 'place a ball'}`
+    : ble.connecting
+    ? 'Connecting…'
+    : live
     ? connection.launchMonitorName ?? 'Launch monitor'
     : connection.connected
     ? 'Bridge on — waiting for monitor'

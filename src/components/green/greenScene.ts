@@ -51,6 +51,8 @@ const FADE_START = 21; // m, terrain contours fade to flat beyond this radius
 const FADE_END = 30;
 
 const toThree = (x: number, y: number, z: number) => new THREE.Vector3(x, y, -z);
+// 9-point sampling pattern (m) used to smooth the slope shown by the arrows
+const SLOPE_KERNEL: [number, number][] = [[0, 0], [0.75, 0], [-0.75, 0], [0, 0.75], [0, -0.75], [0.53, 0.53], [-0.53, 0.53], [0.53, -0.53], [-0.53, -0.53]];
 
 function insidePoly(x: number, z: number, poly: Vec2[]) {
   let inside = false;
@@ -316,14 +318,30 @@ uniform vec2 uMaskMin;
 uniform vec3 uGreenCol, uCollarCol, uRoughCol;
 float spLine(float v) { float d = fwidth(v); return 1.0 - clamp(abs(fract(v - 0.5) - 0.5) / max(d, 1e-5), 0.0, 1.0); }
 float spLineW(float v, float w) { float d = fwidth(v) * w; return 1.0 - clamp(abs(fract(v - 0.5) - 0.5) / max(d, 1e-5), 0.0, 1.0); }
-// Dashes running along a grid line in the downhill direction of that axis' slope component c.
-float spFlow(float s, float c) {
+// One small arrowhead per 1 ft grid edge, sliding from one grid crossing to the next in the
+// downhill direction of the slope along that edge, then starting again.
+// s = position along the line (m), d = distance across it (m), k = which parallel line,
+// c = slope component along +s (positive = downhill toward +s). Returns coverage 0..1.
+float spHash(vec2 v) { return fract(sin(dot(v, vec2(12.9898, 78.233))) * 43758.5453); }
+float spChevron(float s, float d, float k, float c) {
   float m = abs(c);
-  if (m < 0.0015) return 0.0;
-  float speed = clamp(m * 45.0, 0.12, 2.5);
-  float t = fract(sign(c) * s / 0.6096 - uTime * speed);
-  float head = smoothstep(0.25, 0.95, t) * (1.0 - smoothstep(0.95, 1.0, t));
-  return head * clamp(m / 0.008, 0.35, 1.0);
+  if (m < 0.005) return 0.0; // under 0.5%: effectively level along this edge, no arrow
+  float L = 0.3048;
+  float edge = floor(s / L);
+  float e = fract(s / L); // 0..1 along this edge
+  if (c < 0.0) e = 1.0 - e; // measure in the direction of travel
+  // Edges per second, steeper = faster. Quantised to multiples of 0.05 so every arrow repeats
+  // within the 20 s clock period (uTime wraps at 20 s): no drift or smearing however long it runs.
+  float speed = clamp(floor(m * 15.0 / 0.05 + 0.5), 2.0, 12.0) * 0.05;
+  float len = 0.065; // arrow length as a fraction of the edge (~2 cm)
+  float a = len + fract(uTime * speed + spHash(vec2(edge, k))) * (1.0 - len); // tip position
+  float hw = 0.011; // arrow half-width (m)
+  float q = abs(d) / hw;
+  if (q > 1.0) return 0.0;
+  float du = abs(e - (a - len * q)); // V shape, tip leading
+  float aa = fwidth(e);
+  float a1 = 1.0 - smoothstep(max(0.012, aa * 0.75), max(0.012, aa * 0.75) + aa, du);
+  return a1 * (1.0 - smoothstep(0.03, 0.08, aa)); // fade where arrows are too small to read
 }
 vec3 spSlopeCol(float m) {
   float pct = m * 100.0;
@@ -339,9 +357,11 @@ vec3 spRamp(float t) {
   return mix(c3, c4, t - 3.0);
 }`
         )
+        .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\ntotalEmissiveRadiance += spEmit;')
         .replace(
           '#include <map_fragment>',
           `#include <map_fragment>
+vec3 spEmit = vec3(0.0);
 {
   vec2 p = vSpWorld.xz;
   vec2 d = p - uGreenC;
@@ -381,12 +401,18 @@ vec3 spRamp(float t) {
   if (uFlow > 0.5) {
     // Square-style slope lines: lines running along X carry the X part of the slope,
     // lines running along Z carry the Z part. Brighter, faster and warmer = steeper.
-    float lineAlongX = spLineW(p.y / 0.3048, 1.8);
-    float lineAlongZ = spLineW(p.x / 0.3048, 1.8);
-    float cx = -vGrad.x;
-    float cz = -vGrad.y;
-    diffuseColor.rgb = mix(diffuseColor.rgb, spSlopeCol(abs(cx)), lineAlongX * spFlow(p.x, cx) * gAmt);
-    diffuseColor.rgb = mix(diffuseColor.rgb, spSlopeCol(abs(cz)), lineAlongZ * spFlow(p.y, cz) * gAmt);
+    float L = 0.3048;
+    float cx = -vGrad.x; // downhill component along +X
+    float cz = -vGrad.y; // downhill component along +Z
+    float dX = (fract(p.y / L + 0.5) - 0.5) * L; // distance across lines that run along X
+    float dZ = (fract(p.x / L + 0.5) - 0.5) * L; // distance across lines that run along Z
+    vec3 arrowCol = vec3(0.66, 0.88, 0.66); // halfway between green and white
+    // tint the grid line itself with its slope colour so you can see which lines carry slope
+    float aX = spChevron(p.x, dX, floor(p.y / L + 0.5), cx);
+    float aZ = spChevron(p.y, dZ, floor(p.x / L + 0.5) + 1000.0, cz);
+    float cover = clamp(max(aX, aZ), 0.0, 1.0) * gAmt;
+    spEmit = arrowCol * cover * 0.9;
+    diffuseColor.rgb *= 1.0 - 0.8 * cover;
   }
 }`
         );
@@ -668,9 +694,16 @@ vec3 spRamp(float t) {
       const fade = r <= FADE_START ? 1 : r >= FADE_END ? 0 : 1 - (r - FADE_START) / (FADE_END - FADE_START);
       const f = fade * fade * (3 - 2 * fade);
       pos.setY(i, this.hh(x, z) * f);
-      const g = this.surface.gradient(x, z);
-      grad[i * 2] = g.dhdx * f; // dh/dX
-      grad[i * 2 + 1] = -g.dhdz * f; // dh/dZ (Three's Z = -physics z)
+      // Slope for the arrows is averaged over ~1.5 m so small bumps don't flip their direction.
+      let gx = 0;
+      let gz = 0;
+      for (const [ox, oz] of SLOPE_KERNEL) {
+        const g = this.surface.gradient(x + ox, z + oz);
+        gx += g.dhdx;
+        gz += g.dhdz;
+      }
+      grad[i * 2] = (gx / SLOPE_KERNEL.length) * f; // dh/dX
+      grad[i * 2 + 1] = (-gz / SLOPE_KERNEL.length) * f; // dh/dZ (Three's Z = -physics z)
     }
     pos.needsUpdate = true;
     this.terrain.geometry.setAttribute('aGrad', new THREE.BufferAttribute(grad, 2));
@@ -799,6 +832,8 @@ vec3 spRamp(float t) {
     }
   }
 
+  private flowTime = 0;
+
   private loop = () => {
     if (this.disposed) return;
     const now = performance.now();
@@ -855,7 +890,10 @@ vec3 spRamp(float t) {
       pos.needsUpdate = true;
     }
 
-    this.terrainUniforms.uTime.value = now / 1000;
+    // Slope-arrow clock: advances by the (capped) frame time, so switching away and back doesn't
+    // jump it, and wraps every 20 s to stay precise in the shader.
+    this.flowTime = (this.flowTime + dt) % 20;
+    this.terrainUniforms.uTime.value = this.flowTime;
 
     this.updateCamera(dt);
     this.renderer.render(this.scene, this.camera);
@@ -881,9 +919,10 @@ vec3 spRamp(float t) {
         break;
       }
       case 'follow': {
-        const back = Math.min(1.6, 0.8 + dist * 0.06);
-        wantPos = ball.clone().sub(dir.clone().multiplyScalar(back)).add(new THREE.Vector3(0, 0.55 + dist * 0.02, 0));
-        wantLook = ball.clone().add(dir.clone().multiplyScalar(Math.min(dist, 3)));
+        // Chase camera: ball sits in the lower part of the frame, at address and while rolling.
+        const back = 1.3;
+        wantPos = ball.clone().sub(dir.clone().multiplyScalar(back)).add(new THREE.Vector3(0, 0.8, 0));
+        wantLook = ball.clone().add(dir.clone().multiplyScalar(Math.min(dist, 1.5)));
         break;
       }
       case 'orbit': {

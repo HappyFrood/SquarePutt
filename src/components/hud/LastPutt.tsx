@@ -22,6 +22,7 @@ const dirWord = (v: number, pos: string, neg: string, eps = 0.15) => (Math.abs(v
 export function ImpactDiagram({ shot }: { shot: PuttingShotData }) {
   const face = shot.faceAngleDeg * K;
   const path = shot.putterPathDeg * K;
+  const showPath = shot.clubMeasured !== false;
   const start = shot.hla * K;
   const cx = 150;
   const cy = 112;
@@ -29,11 +30,13 @@ export function ImpactDiagram({ shot }: { shot: PuttingShotData }) {
     <svg viewBox="0 0 300 190" className="w-full" role="img" aria-label="Putter face, path and start line at impact, seen from above">
       <line x1={cx} y1={8} x2={cx} y2={182} stroke="#6f8a7c" strokeWidth={1.5} strokeDasharray="5 5" />
       <text x={cx + 6} y={18} fill="#6f8a7c" fontSize={11}>to target</text>
-      {/* path */}
-      <g transform={`rotate(${path} ${cx} ${cy})`}>
-        <line x1={cx} y1={cy + 70} x2={cx} y2={cy - 30} stroke="#4fb3ff" strokeWidth={3} strokeLinecap="round" />
-        <path d={`M ${cx - 6} ${cy - 24} L ${cx} ${cy - 36} L ${cx + 6} ${cy - 24} Z`} fill="#4fb3ff" />
-      </g>
+      {/* path (only when measured) */}
+      {showPath && (
+        <g transform={`rotate(${path} ${cx} ${cy})`}>
+          <line x1={cx} y1={cy + 70} x2={cx} y2={cy - 30} stroke="#4fb3ff" strokeWidth={3} strokeLinecap="round" />
+          <path d={`M ${cx - 6} ${cy - 24} L ${cx} ${cy - 36} L ${cx + 6} ${cy - 24} Z`} fill="#4fb3ff" />
+        </g>
+      )}
       {/* start line */}
       <g transform={`rotate(${start} ${cx} ${cy})`}>
         <line x1={cx} y1={cy - 12} x2={cx} y2={cy - 92} stroke="#f5c84c" strokeWidth={3} strokeLinecap="round" />
@@ -93,8 +96,12 @@ export function LastPutt({ shot, recent }: { shot: PuttingShotData | null; recen
       <div className="px-5 pt-4">
         <ImpactDiagram shot={shot} />
         <div className="mt-2 grid grid-cols-3 gap-2 pb-4">
-          <Angle color="bg-chalk" label="Face" value={shot.faceAngleDeg} word={dirWord(shot.faceAngleDeg, 'open', 'closed')} />
-          <Angle color="bg-eagle" label="Path" value={shot.putterPathDeg} word={dirWord(shot.putterPathDeg, 'in-to-out', 'out-to-in')} />
+          <Angle color="bg-chalk" label={shot.clubMeasured === false ? 'Face (est.)' : 'Face'} value={shot.faceAngleDeg} word={dirWord(shot.faceAngleDeg, 'open', 'closed')} />
+          {shot.clubMeasured === false ? (
+            <Angle color="bg-eagle" label="Path" value={null} word="not measured" />
+          ) : (
+            <Angle color="bg-eagle" label="Path" value={shot.putterPathDeg} word={dirWord(shot.putterPathDeg, 'in-to-out', 'out-to-in')} />
+          )}
           <Angle color="bg-flag" label="Start" value={shot.hla} word={dirWord(shot.hla, 'right', 'left', 0.05)} />
         </div>
       </div>
@@ -127,14 +134,14 @@ function Metric({ label, value, unit, note, grade }: { label: string; value: str
   );
 }
 
-function Angle({ color, label, value, word }: { color: string; label: string; value: number; word: string }) {
+function Angle({ color, label, value, word }: { color: string; label: string; value: number | null; word: string }) {
   return (
     <div>
       <div className="flex items-center gap-1.5 text-xs text-fog">
         <span className={`h-1 w-3 rounded-full ${color}`} />
         {label}
       </div>
-      <div className="num text-2xl font-semibold">{signed(value)}°</div>
+      <div className="num text-2xl font-semibold">{value === null ? '–' : `${signed(value)}°`}</div>
       <div className="text-xs text-mist">{word}</div>
     </div>
   );

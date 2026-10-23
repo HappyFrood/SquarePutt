@@ -224,6 +224,31 @@ class AudioSynthesizer {
     this.impact(t + 0.045, 0.14, modes, 1.0);
   }
 
+  /** Short, soft bell when the ball is set correctly in the hitting zone. */
+  playReady() {
+    if (!this.enabled) return;
+    const ctx = this.init();
+    if (!ctx) return;
+    const t = ctx.currentTime + 0.01;
+    [
+      [1568, 0.14],
+      [3136, 0.04],
+      [4705, 0.02],
+    ].forEach(([f, g]) => {
+      const o = ctx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      const gn = ctx.createGain();
+      gn.gain.setValueAtTime(0.0001, t);
+      gn.gain.linearRampToValueAtTime(g, t + 0.005);
+      gn.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+      o.connect(gn);
+      gn.connect(this.master!);
+      o.start(t);
+      o.stop(t + 0.5);
+    });
+  }
+
   playChime() {
     if (!this.enabled) return;
     const ctx = this.init();
