@@ -62,8 +62,8 @@ const sameLayout = (a: PuttLayout, b: PuttLayout) =>
   a.ball?.z === b.ball?.z &&
   a.greenRadiusM === b.greenRadiusM;
 
-/** Aim steps (degrees): 0.25° to 1.5°, then 0.5° to 3°, then 1° to 15°. */
-const AIM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+/** Aim steps (degrees): 0.5° at a time, up to 6° either side. */
+const AIM_STEPS = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 5.5, 6];
 
 
 const CONFETTI = ['#f5c84c', '#eef2ea', '#4ade80'];
@@ -248,7 +248,14 @@ export default function App() {
       if (!busy) nudgeAim(dir);
     };
     window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    // The Square's own remote (its left / right buttons, over Bluetooth)
+    const offRemote = squareBle.onRemote((b) => {
+      if (!busy) nudgeAim(b === 'left' ? -1 : 1);
+    });
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      offRemote();
+    };
   }, [mode, aimLocked, busy, nudgeAim]);
   const read = useMemo(() => readPutt(surface, ball), [surface, ball]);
 

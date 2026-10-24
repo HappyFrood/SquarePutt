@@ -25,6 +25,7 @@ const MPS_TO_MPH = 1 / 0.44704;
 const READY_HOLD_MS = 400;
 
 export type SquareModel = 'home' | 'omni';
+export type RemoteButton = 'left' | 'right';
 const MODEL_KEY = 'squareputt_square_model_v1';
 /** Putter ClubSelect bytes per model (Omni = Home code with category − 4). */
 export const PUTTER_CODE: Record<SquareModel, [number, number]> = { home: [0x01, 0x07], omni: [0x01, 0x03] };
@@ -117,6 +118,7 @@ class SquareBle {
   private writeChain: Promise<unknown> = Promise.resolve();
   private shotHandlers = new Set<ShotHandler>();
   private statusHandlers = new Set<StatusHandler>();
+  private remoteHandlers = new Set<(b: RemoteButton) => void>();
   private opts: SquareOptions = { handed: 'right', putterCode: null };
   private chargePoll: ReturnType<typeof setInterval> | null = null;
   private rearmTimer: ReturnType<typeof setTimeout> | null = null;
@@ -151,6 +153,14 @@ class SquareBle {
     this.shotHandlers.add(h);
     return () => {
       this.shotHandlers.delete(h);
+    };
+  }
+
+  /** Buttons on the Square's handheld remote (used to move the aim). */
+  onRemote(h: (b: RemoteButton) => void) {
+    this.remoteHandlers.add(h);
+    return () => {
+      this.remoteHandlers.delete(h);
     };
   }
 
@@ -439,6 +449,13 @@ class SquareBle {
     // and repeated status lines (11 03 <counter> …: logged only when the part after the counter changes).
     const isSensor = bytes[0] === 0x11 && bytes[1] === 0x01;
     const isStatus = bytes[0] === 0x11 && bytes[1] === 0x03;
+    // Square's handheld remote: 12 6a … (left) / 12 69 … (right); byte 5 = 01 pressed, 00 released.
+    if (bytes[0] === 0x12 && (bytes[1] === 0x69 || bytes[1] === 0x6a) && bytes.length >= 6) {
+      const dir: RemoteButton = bytes[1] === 0x6a ? 'left' : 'right';
+      this.pushLog(`${hex}  (remote ${dir} ${bytes[5] === 0x01 ? 'press' : 'release'})`);
+      if (bytes[5] === 0x01) this.remoteHandlers.forEach((h) => h(dir));
+      return;
+    }
     if (isStatus) {
       const body = hex.slice(6);
       if (body !== this.lastStatusBody) this.pushLog(hex);

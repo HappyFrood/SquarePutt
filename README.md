@@ -135,7 +135,13 @@ The overall grade includes the read. With **Read + line** on, the read isn't tes
 
 ### Choosing your start line
 
-Before each putt, pick the direction you intend to start the ball. Tap **◀ ▶** (bottom right of the green), press the **← →** arrow keys, or use a presentation remote (its **Page Up / Page Down** buttons). Steps are 0.25° up to 1.5°, then 0.5° up to 3°, then 1° up to 15°. Hold a button to keep moving, and tap the readout to go back to straight at the hole. The box shows only the angle (e.g. "1.25° left"), and the green shows a short (~2 ft) yellow arrow from the ball. Neither gives away where your line meets the hole, so the read stays yours. Start-line results, the trend and drill spreads are then measured against this line, so you're grading your stroke, not your read. With **Help reading the putt → Read + line**, the start line is locked to the ideal line and the controls are disabled.
+Before each putt, pick the direction you intend to start the ball. You can:
+- tap **◀ ▶** (bottom right of the green)
+- press the **← →** arrow keys
+- press the **Square's own remote** (its left/right buttons come over Bluetooth)
+- use a presentation remote (its **Page Up / Page Down** buttons).
+
+Each press moves the aim **0.5°**, up to 6° either side. Hold a button to keep moving, and tap the readout to go back to straight at the hole. The box shows only the angle (e.g. "1.25° left"), and the green shows a short (~2 ft) yellow arrow from the ball. Neither gives away where your line meets the hole, so the read stays yours. Start-line results, the trend and drill spreads are then measured against this line, so you're grading your stroke, not your read. With **Help reading the putt → Read + line**, the start line is locked to the ideal line and the controls are disabled.
 
 Grades use the Quintic-style tiers: **Eagle** (tour level), **Birdie**, **Par**, **Bogey**.
 

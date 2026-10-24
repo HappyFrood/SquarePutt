@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.7.1 — October 2026
+
+### Added
+- **The Square's remote moves the aim.** Its left and right buttons arrive over Bluetooth as `12 6a …` (left) and `12 69 …` (right), with byte 5 = `01` on press and `00` on release. Each press moves the aim one step. The messages stay in the launch monitor log, labelled "remote left/right press/release".
+
+### Changed
+- **Aim steps are 0.5°, up to 6°** either side.
+
+
 ## 2.7.0 — October 2026
 
 ### Changed

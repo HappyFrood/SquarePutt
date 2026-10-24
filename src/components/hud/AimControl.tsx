@@ -5,9 +5,9 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 
 /**
  * Bottom-right: choose the start line by tapping left / right (or with a remote / keyboard:
- * ← → arrow keys, or Page Up / Page Down as sent by presentation clickers). Steps: 0.25° up to
- * 1.5°, then 0.5° up to 3°, then 1° up to 15°. Hold a button to keep moving. Shows degrees only,
- * so it doesn't give away where the line meets the hole.
+ * ← → arrow keys, Page Up / Page Down as sent by presentation clickers, or the Square's own
+ * remote). Steps of 0.5° up to 6°. Hold a button to keep moving. Shows degrees only, so it
+ * doesn't give away where the line meets the hole.
  * Locked to the ideal line when the "Read + line" assist is on.
  */
 export function AimControl({
