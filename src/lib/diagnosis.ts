@@ -30,8 +30,11 @@ export interface Diagnosis {
   headline: string;
 }
 
-/** Ideal putting launch window (degrees): ball lifts out of its depression and rolls early. */
-export const LAUNCH_WINDOW: [number, number] = [1, 2];
+/**
+ * Ideal putting launch window (degrees): the ball lifts out of its resting depression without
+ * hopping, giving the shortest skid. 1.5–4° per Quintic / SAM PuttLab research (as cited by fitters).
+ */
+export const LAUNCH_WINDOW: [number, number] = [1.5, 4];
 
 /** Degrees for display, one decimal: 1.0° → "1°", 0.5° → "0.5°", 0.19° → "0.2°". */
 export const fmtDeg = (d: number) => {
@@ -112,17 +115,18 @@ export function diagnose(s: PuttingShotData): Diagnosis {
       dir: r.verdict === 'good' ? undefined : r.verdict === 'over' ? 'up' : 'down',
     };
 
-  // Launch / loft: launch angle against the ideal window
+  // Launch & roll: launch angle against the ideal window, and how soon the ball starts rolling.
   const v = s.vla;
   const [lo, hi] = LAUNCH_WINDOW;
+  const roll = rollSummary(s);
   const loft: DiagPart =
     v === undefined || Number.isNaN(v)
-      ? { state: 'na', text: '–' }
+      ? { state: 'na', text: '–', detail: roll }
       : v < lo
-      ? { state: 'off', text: 'Too little loft', detail: `launch ${v.toFixed(1)}° · ideal ${lo}–${hi}° · more skid`, dir: 'down' }
+      ? { state: 'off', text: 'Too little loft', detail: `launch ${v.toFixed(1)}° (ideal ${lo}–${hi}°) · ${roll}`, dir: 'down' }
       : v > hi
-      ? { state: 'off', text: 'Too much loft', detail: `launch ${v.toFixed(1)}° · ideal ${lo}–${hi}° · ball hops`, dir: 'up' }
-      : { state: 'good', text: 'Good launch', detail: `launch ${v.toFixed(1)}° · ${s.skidDistanceInches.toFixed(0)} in skid` };
+      ? { state: 'off', text: 'Too much loft', detail: `launch ${v.toFixed(1)}° (ideal ${lo}–${hi}°) · ${roll}`, dir: 'up' }
+      : { state: 'good', text: 'Good launch', detail: `launch ${v.toFixed(1)}° · ${roll}` };
 
   // Headline: which of read, face, pace cost the putt (loft is shown, not blamed)
   const off = [read.state === 'off' && 'read', face.state === 'off' && 'face', pace.state === 'off' && 'pace'].filter(Boolean) as string[];
@@ -134,6 +138,12 @@ export function diagnose(s: PuttingShotData): Diagnosis {
   else if (off.length === 2) headline = `${cap(name[off[0]])} and ${name[off[1]]} both off`;
   else headline = 'Read, face and pace all off';
   return { pace, face, read, loft, headline };
+}
+
+/** "rolling after 24 in (14%)": skid from the physics model (speed + launch; no spin is measured). */
+export function rollSummary(s: PuttingShotData) {
+  const pct = s.rollDistanceFt > 0 ? Math.round((s.skidDistanceInches / 12 / s.rollDistanceFt) * 100) : 0;
+  return `rolling after ${s.skidDistanceInches.toFixed(0)} in (${pct}%)`;
 }
 
 const median = (sorted: number[]) => {

@@ -47,13 +47,13 @@ export function LastPutt({ shot, recent }: { shot: PuttingShotData | null; recen
         {!shot.noHole && <FeedbackCard label="Pace" p={d.pace} />}
         <FeedbackCard label="Face control" p={d.face} />
         {!shot.noHole && <FeedbackCard label="Read" p={d.read} />}
-        <FeedbackCard label="Launch" p={d.loft} />
+        <FeedbackCard label="Launch & roll" p={d.loft} />
       </div>
       {shot.read && <ReadLine shot={shot} />}
 
       <div className="grid grid-cols-3 gap-px border-t border-line bg-line text-center">
-        <Small label="Spin" value={shot.backspinRpm !== undefined && shot.backspinRpm !== 0 ? `${Math.round(shot.backspinRpm)} rpm` : '–'} />
-        <Small label="Skid" value={`${shot.skidDistanceInches.toFixed(0)} in`} />
+        <Small label="Launch" value={`${shot.vla.toFixed(1)}°`} />
+        <Small label="Skid (est.)" value={`${shot.skidDistanceInches.toFixed(0)} in`} />
         <Small label="Rolled" value={`${shot.rollDistanceFt.toFixed(1)} ft`} />
       </div>
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## 2.8.2 — October 2026
+
+### Changed
+- **Launch angle now drives the physics.** The ball hops for 2·v·sinθ/g off the face, then lands at v·cosθ. Launch backspin is estimated from loft as (5/7)·v·sinθ, because the Home Edition sends no spin on putts. More loft means a longer skid (about 5–15% from 0° to 4°). Distance moves under 0.5%, so the calibration (0.386 ft/mph² at stimp 10) is unchanged. The read check and "line at your pace" simulations use the putt's launch too.
+- **Spin removed from the display.** It isn't measured on Home Edition putts. The bottom row is now Launch · Skid (est.) · Rolled.
+
+
+## 2.8.1 — October 2026
+
+### Changed
+- **Launch window widened to 1.5–4°** (Quintic / SAM PuttLab guidance as cited by fitters). It was 1–2°.
+- **Launch & roll card:** adds spin when measured (backspin vs topspin) and where the ball starts rolling.
+- **Virtual putts** launch around 1.2–2.8° instead of a fixed 1.4°.
+
+### Fixed
+- **Spin on putts.** Units checked against allsquare's wire documentation and squaregolf-connector: speed, launch, direction and spin were all decoded correctly. But byte 2 of the ball message is a validity mask. Home Edition putts send `0x13`, with spin axis and sidespin unmeasured and total spin and backspin as exact zeros. These now count as not measured instead of "0 rpm", the skid is labelled as an estimate, and measured spin (full shots, Omni) feeds the skid physics.
+
+
 ## 2.8.0 — October 2026
 
 ### Changed

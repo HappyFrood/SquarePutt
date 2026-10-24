@@ -180,10 +180,12 @@ class OpenConnectService {
   private processStroke(s: NormalizedStroke, source: 'live' | 'sim'): PuttingShotData | null {
     const ctx = this.context;
     if (!ctx) return null;
+    // Home Edition putts give speed, direction and launch (no spin): launch sets the hop and the
+    // estimated launch backspin, and so the skid.
     const sim = simulatePutt(ctx.setup, {
       ballSpeedMph: s.ballSpeedMph,
       hlaDeg: s.hlaDeg,
-      backspinRpm: s.backspinRpm,
+      launchDeg: s.vlaDeg,
     });
 
     // Did the ball leave the putting surface? (first sample off the green)
@@ -204,7 +206,7 @@ class OpenConnectService {
       const aimIn = Math.tan((aim * Math.PI) / 180) * distIn;
       const idealIn = ctx.ideal.aimOffsetIn;
       const errorIn = aimIn - idealIn;
-      const rs = simulatePutt({ ...ctx.setup, speedCalibration: 1 }, { ballSpeedMph: ctx.ideal.ballSpeedMph, hlaDeg: aim }, { dt: 0.002 });
+      const rs = simulatePutt({ ...ctx.setup, speedCalibration: 1 }, { ballSpeedMph: ctx.ideal.ballSpeedMph, hlaDeg: aim, launchDeg: s.vlaDeg }, { dt: 0.002 });
       const idealDeg = ctx.ideal.hlaDeg;
       const errorDeg = aim - idealDeg;
       const breaking = Math.abs(idealDeg) >= 0.25; // the smallest aim step
@@ -238,7 +240,7 @@ class OpenConnectService {
             : undefined,
       };
       if (typeof read.paceLineDeg === 'number') {
-        read.paceLineHoles = simulatePutt({ ...ctx.setup, speedCalibration: 1 }, { ballSpeedMph: effSpeed, hlaDeg: read.paceLineDeg }, { dt: 0.002 }).isHoled;
+        read.paceLineHoles = simulatePutt({ ...ctx.setup, speedCalibration: 1 }, { ballSpeedMph: effSpeed, hlaDeg: read.paceLineDeg, launchDeg: s.vlaDeg }, { dt: 0.002 }).isHoled;
       }
     }
 
@@ -322,11 +324,12 @@ class OpenConnectService {
     pathDeg?: number;
     angleOfAttackDeg?: number;
     dynamicLoftDeg?: number;
+    vlaDeg?: number;
   }) {
     const face = p.faceAngleDeg ?? p.hlaDeg / 0.82;
     return this.processPacket(
       {
-        BallData: { Speed: p.ballSpeedMph, HLA: p.hlaDeg, VLA: 1.2 + 0.3 * (p.dynamicLoftDeg ?? 2.5) - 0.5 },
+        BallData: { Speed: p.ballSpeedMph, HLA: p.hlaDeg, VLA: p.vlaDeg ?? 2 + (Math.random() - 0.5) * 1.6 }, // virtual putts: launch around 1.2–2.8°
         ClubData: {
           Path: p.pathDeg ?? 0,
           FaceAngle: face,

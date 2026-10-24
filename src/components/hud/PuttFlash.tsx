@@ -30,7 +30,7 @@ export function PuttFlash({
           <FeedbackCard compact label='Pace' p={d.pace} />
           <FeedbackCard compact label='Face control' p={d.face} />
           <FeedbackCard compact label='Read' p={d.read} />
-          <FeedbackCard compact label='Launch' p={d.loft} />
+          <FeedbackCard compact label='Launch & roll' p={d.loft} />
         </div>
       </button>
     </div>

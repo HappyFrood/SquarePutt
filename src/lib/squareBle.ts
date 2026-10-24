@@ -99,10 +99,11 @@ interface PendingBall {
   speedMps: number;
   launch: number;
   direction: number;
-  totalSpin: number;
-  spinAxis: number;
-  backspin: number;
-  sidespin: number;
+  /** Spin fields are undefined when the Square didn't measure them (see the validity mask). */
+  totalSpin?: number;
+  spinAxis?: number;
+  backspin?: number;
+  sidespin?: number;
 }
 
 class SquareBle {
@@ -515,15 +516,29 @@ class SquareBle {
         if (bytes.length < 17) return;
         if (i16(v, 3) === -32768) return; // no valid ball speed
         this.flushPending(); // an unanswered earlier ball
-        const spin = (o: number) => (i16(v, o) === -32768 ? 0 : i16(v, o));
+        // Units (allsquare WIRE.md §6.2, squaregolf-connector): speed i16/100 m/s, launch and
+        // direction i16/100 deg (direction + = right), spins raw rpm, spin axis i16/100 deg; spin
+        // axis and sidespin are sign-inverted. Byte 2 is a validity mask (bit 0 speed, 1 total spin,
+        // 2 spin axis, 4 backspin, 5 sidespin): 0x37 on a fully tracked shot, 0x13 on Home Edition
+        // putts, whose spin values then come back as exact zeros — i.e. not measured.
+        const mask = bytes[2];
+        const field = (bit: number, o: number) => (mask & (1 << bit) && i16(v, o) !== -32768 ? i16(v, o) : undefined);
+        let totalSpin = field(1, 9);
+        let backspin = field(4, 13);
+        const axis = field(2, 11);
+        const side = field(5, 15);
+        if (totalSpin === 0 && (backspin ?? 0) === 0 && axis === undefined) {
+          totalSpin = undefined; // a real putt never leaves at exactly 0 rpm: treat as not measured
+          backspin = undefined;
+        }
         this.pending = {
           speedMps: i16(v, 3) / 100,
           launch: i16(v, 5) / 100,
           direction: i16(v, 7) / 100,
-          totalSpin: spin(9),
-          spinAxis: -spin(11) / 100, // device sends these sign-inverted
-          backspin: spin(13),
-          sidespin: -spin(15),
+          totalSpin,
+          spinAxis: axis !== undefined ? -axis / 100 : undefined, // device sends these sign-inverted
+          backspin,
+          sidespin: side !== undefined ? -side : undefined,
         };
         // Club metrics are pulled, not pushed. The Home Edition measures path/attack (with the
         // reflective club sticker) and estimates face; squaregolf-connector discards them for the

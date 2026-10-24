@@ -72,8 +72,10 @@ export interface StrokeInput {
   ballSpeedMph: number;
   /** Launch direction relative to the ball-to-hole line. + = right. */
   hlaDeg: number;
-  /** Signed backspin at launch (rpm). Negative = topspin. */
+  /** Signed backspin at launch (rpm). Negative = topspin. If absent, estimated from launch angle. */
   backspinRpm?: number;
+  /** Vertical launch angle (deg). Gives the short hop off the face and the launch backspin. */
+  launchDeg?: number;
 }
 
 export interface SimulationResult {
@@ -126,12 +128,22 @@ export function simulatePutt(setup: PuttSetup, stroke: StrokeInput, opts: SimOpt
   const dirZ = fz * Math.cos(th) + rz * Math.sin(th);
 
   const v0 = Math.max(0, stroke.ballSpeedMph) * MPH_TO_MPS * (setup.speedCalibration ?? 1);
+  // Launch: the ball leaves the face at angle θ, flies a short hop (t = 2·v·sinθ / g) without
+  // touching the green, and lands keeping its horizontal speed v·cosθ.
+  const launch = (Math.max(0, Math.min(10, stroke.launchDeg ?? 0)) * Math.PI) / 180;
+  const airTime = (2 * v0 * Math.sin(launch)) / GRAVITY;
+  const vh = v0 * Math.cos(launch);
   let x = setup.ball.x;
   let z = setup.ball.z;
-  let vx = v0 * dirX;
-  let vz = v0 * dirZ;
+  let vx = vh * dirX;
+  let vz = vh * dirZ;
   // Contact-point rolling velocity u = R*omega (in the direction of travel). Backspin < 0.
-  const u0 = -((stroke.backspinRpm ?? 0) * 2 * Math.PI) / 60 * BALL_RADIUS_M;
+  // Without measured spin (the Home Edition reports none on putts), estimate the backspin the
+  // loft puts on the ball: it rolls up the face during impact, leaving u = −(5/7)·v·sinθ.
+  const u0 =
+    stroke.backspinRpm !== undefined
+      ? -((stroke.backspinRpm * 2 * Math.PI) / 60) * BALL_RADIUS_M
+      : -(5 / 7) * v0 * Math.sin(launch);
   let ux = u0 * dirX;
   let uz = u0 * dirZ;
 
@@ -166,7 +178,11 @@ export function simulatePutt(setup: PuttSetup, stroke: StrokeInput, opts: SimOpt
 
     let ax: number;
     let az: number;
-    if (skidding) {
+    if (t < airTime) {
+      // in the air off the face: no friction, no slope
+      ax = 0;
+      az = 0;
+    } else if (skidding) {
       const slipX = vx - ux;
       const slipZ = vz - uz;
       const slip = Math.hypot(slipX, slipZ);

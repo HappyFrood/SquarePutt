@@ -113,8 +113,8 @@ Baselines: the PGA Tour figures are Broadie's ShotLink table. The amateur ones a
   - **Pace:** % soft or firm against the ideal pace, with an arrow up for firm and down for soft. The ball speed and where it finished are shown as detail. Pace is judged by where the ball ended up: holed, or it reached the hole and finished no more than 1.5 ft past (5% of the putt on long ones).
   - **Face control:** how far off your aim the ball started, with a left or right arrow. Good within ~1.5 in at the hole, never stricter than 0.5°. The Square measures start direction, which is mostly face angle.
   - **Read:** the share of the break you played (100% = ideal). SquarePutt rolls *your* chosen line at perfect pace; if it drops, it's a good read. Otherwise it shows under-read or over-read by how many degrees, with an arrow down for too little and up for too much. Straight putts say how far left or right you aimed. A sentence underneath gives your aim against the ideal line. When the pace was off, it also gives the line that would have holed *at the pace you hit* (read and pace are linked: firmer needs less break, softer needs more).
-  - **Launch:** launch angle against the ideal 1–2° window: "Too little loft" (driven into the turf, more skid) or "Too much loft" (the ball hops).
-- **Spin, skid and roll** distance.
+  - **Launch & roll:** launch angle against the ideal **1.5–4°** window (per Quintic / SAM PuttLab research): "Too little loft" (driven into the turf) or "Too much loft" (the ball hops). It also gives where the ball starts rolling ("rolling after 24 in (14%)").
+- **Launch, skid (est.) and roll** distance. The Home Edition doesn't measure spin on putts (its validity byte says so, and the values come back as zeros), so spin isn't shown. The skid is estimated by the physics from ball speed and launch.
 - **Face control trend:** your last 10 putts' start direction against your aim, with a ±0.5° band, the spread graded, and any left/right bias.
 
 During drills the same four cards pop up on the green for a few seconds.
@@ -147,7 +147,8 @@ Grades use the Quintic-style tiers: **Eagle** (tour level), **Birdie**, **Par**,
 ### Physics (`src/lib/physicsEngine.ts`)
 Based on Penner, *The physics of putting* (Can. J. Phys., 2002) and Holmes (1991).
 
-- **Skid:** the ball leaves the face sliding. Kinetic friction (μ = 0.2) slows it and spins it up until it rolls; with no launch spin it keeps 5/7 of its speed. Backspin/topspin from the monitor is used when sent.
+- **Launch:** the ball leaves the face at the measured launch angle θ. It hops a short way first (airborne for 2·v·sinθ/g, about 2–8 cm), landing with its horizontal speed v·cosθ. Loft also gives it a little launch backspin, estimated as (5/7)·v·sinθ at the contact point (the ball rolls up the face during impact), because the Home Edition doesn't measure spin on putts.
+- **Skid:** the ball then slides. Kinetic friction (μ = 0.2) slows it and spins it up until it rolls. More loft means a longer skid (about 5–15% longer from 0° to 4°), but total distance barely changes (under 0.5%), so the speed calibration is unaffected.
 - **Roll:** constant rolling resistance from the Stimpmeter definition (the USGA ramp releases a rolling ball at 1.83 m/s, which rolls *S* ft). On slopes, gravity acts fully on a sliding ball and at 5/7 strength on a rolling ball.
 - **Cup:** a ball falls in if it drops a ball-radius while its centre crosses the hole: max speed ≈ 1.63 m/s dead centre, much less near the edge. Faster balls lip out (deflected) or hop the cup.
 - **Calibration:** on flat ground this gives ~0.39 ft per mph² at stimp 10 (e.g. 9 mph → ~31 ft), matching measured launch-monitor putting data. A **ball speed calibration** setting (85–115%) lets you match your monitor to a real green.
