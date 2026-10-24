@@ -118,7 +118,7 @@ class SquareBle {
   private writeChain: Promise<unknown> = Promise.resolve();
   private shotHandlers = new Set<ShotHandler>();
   private statusHandlers = new Set<StatusHandler>();
-  private remoteHandlers = new Set<(b: RemoteButton) => void>();
+  private remoteHandlers = new Set<(b: RemoteButton, pressed: boolean) => void>();
   private opts: SquareOptions = { handed: 'right', putterCode: null };
   private chargePoll: ReturnType<typeof setInterval> | null = null;
   private rearmTimer: ReturnType<typeof setTimeout> | null = null;
@@ -156,8 +156,8 @@ class SquareBle {
     };
   }
 
-  /** Buttons on the Square's handheld remote (used to move the aim). */
-  onRemote(h: (b: RemoteButton) => void) {
+  /** Buttons on the Square's handheld remote (used to move the aim): press and release. */
+  onRemote(h: (b: RemoteButton, pressed: boolean) => void) {
     this.remoteHandlers.add(h);
     return () => {
       this.remoteHandlers.delete(h);
@@ -449,11 +449,12 @@ class SquareBle {
     // and repeated status lines (11 03 <counter> …: logged only when the part after the counter changes).
     const isSensor = bytes[0] === 0x11 && bytes[1] === 0x01;
     const isStatus = bytes[0] === 0x11 && bytes[1] === 0x03;
-    // Square's handheld remote: 12 6a … (left) / 12 69 … (right); byte 5 = 01 pressed, 00 released.
+    // Square's handheld remote: 12 69 … (left) / 12 6a … (right); byte 5 = 01 pressed, 00 released.
     if (bytes[0] === 0x12 && (bytes[1] === 0x69 || bytes[1] === 0x6a) && bytes.length >= 6) {
-      const dir: RemoteButton = bytes[1] === 0x6a ? 'left' : 'right';
-      this.pushLog(`${hex}  (remote ${dir} ${bytes[5] === 0x01 ? 'press' : 'release'})`);
-      if (bytes[5] === 0x01) this.remoteHandlers.forEach((h) => h(dir));
+      const dir: RemoteButton = bytes[1] === 0x69 ? 'left' : 'right';
+      const pressed = bytes[5] === 0x01;
+      this.pushLog(`${hex}  (remote ${dir} ${pressed ? 'press' : 'release'})`);
+      this.remoteHandlers.forEach((h) => h(dir, pressed));
       return;
     }
     if (isStatus) {

@@ -92,9 +92,28 @@ export function ConnectionDrawer({ open, onClose, state, ble }: { open: boolean;
             </div>
 
             {!ble.supported ? (
-              <p className="rounded-lg bg-club-950 p-3 text-sm text-mist ring-1 ring-line">
-                This browser can&apos;t use Bluetooth. Open SquarePutt in <strong className="text-chalk">Chrome</strong> or <strong className="text-chalk">Edge</strong> on your laptop.
-              </p>
+              typeof window !== 'undefined' && !window.isSecureContext ? (
+                // Chrome only offers Bluetooth to secure pages: https, or localhost on the same device.
+                <div className="space-y-2 rounded-lg bg-club-950 p-3 text-sm text-mist ring-1 ring-line">
+                  <p className="font-semibold text-par">Bluetooth is blocked because this page isn&apos;t secure.</p>
+                  <p>
+                    Chrome only allows Bluetooth on <span className="text-chalk">https</span> pages, or on <span className="text-chalk">localhost</span> on the same device. This page is plain <span className="text-chalk">http</span> from another computer. To allow it on this device:
+                  </p>
+                  <ol className="list-decimal space-y-1 pl-5">
+                    <li>
+                      Open <span className="text-chalk">chrome://flags</span> and search for <span className="text-chalk">Insecure origins treated as secure</span>.
+                    </li>
+                    <li>
+                      Set it to <span className="text-chalk">Enabled</span> and enter exactly: <code className="rounded bg-club-800 px-1.5 py-0.5 text-chalk">{window.location.origin}</code>
+                    </li>
+                    <li>Tap Relaunch, then reopen SquarePutt.</li>
+                  </ol>
+                </div>
+              ) : (
+                <p className="rounded-lg bg-club-950 p-3 text-sm text-mist ring-1 ring-line">
+                  This browser can&apos;t use Bluetooth. Open SquarePutt in <strong className="text-chalk">Chrome</strong> or <strong className="text-chalk">Edge</strong> (on Android, the Chrome app; Samsung Internet and Firefox don&apos;t support it).
+                </p>
+              )
             ) : ble.connected ? (
               <div className="space-y-3">
                 <div className="grid grid-cols-3 gap-2 text-sm">

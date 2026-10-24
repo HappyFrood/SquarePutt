@@ -172,7 +172,7 @@ export function StatsView({ shots, onDataChanged, baseline, onBaseline }: { shot
                     {(
                       [
                         ['Read', rs.missCause.readPct],
-                        ['Start line', rs.missCause.linePct],
+                        ['Face control', rs.missCause.facePct],
                         ['Pace', rs.missCause.pacePct],
                       ] as const
                     ).map(([label, pct]) => (
@@ -185,7 +185,7 @@ export function StatsView({ shots, onDataChanged, baseline, onBaseline }: { shot
                       </div>
                     ))}
                   </div>
-                  <p className="mt-2 text-xs text-fog">A miss can count against more than one. Start line within ~1.5 in at the hole (at least 0.5°) counts as good; pace is good if the ball reached the hole and finished no more than 1.5 ft past (5% of the putt on long ones).</p>
+                  <p className="mt-2 text-xs text-fog">A miss can count against more than one. Face control: started within ~1.5 in at the hole of your aim (at least 0.5°); pace is good if the ball reached the hole and finished no more than 1.5 ft past (5% of the putt on long ones).</p>
                 </div>
               )}
             </>

@@ -108,21 +108,16 @@ Baselines: the PGA Tour figures are Broadie's ShotLink table. The amateur ones a
 
 - Everything appears **when the ball stops**, not when it's struck: result, grades, markers and drill scores.
 - **Result:** holed, lipped out, off the green, or e.g. "2.1 ft short, 3 in left".
-- **Ball speed** and how it compares with the ideal speed for that putt ("4% firm").
-- **Start line** and how far it was from the start line you chose ("0.5° right of your line").
-- **Launch angle, spin, skid and roll distance**, with a note if launch is too low or high.
-- **Last 10 putts:** start line (against your line) and pace trend, with start-line spread graded.
+- **A one-line verdict** naming what cost the putt: "Misread", "Pace cost it", "Face control cost it", or "Holed — read, face and pace all good".
+- **Four feedback cards**, each with a ✓ or ✗, an arrow, and a detail line:
+  - **Pace:** % soft or firm against the ideal pace, with an arrow up for firm and down for soft. The ball speed and where it finished are shown as detail. Pace is judged by where the ball ended up: holed, or it reached the hole and finished no more than 1.5 ft past (5% of the putt on long ones).
+  - **Face control:** how far off your aim the ball started, with a left or right arrow. Good within ~1.5 in at the hole, never stricter than 0.5°. The Square measures start direction, which is mostly face angle.
+  - **Read:** the share of the break you played (100% = ideal). SquarePutt rolls *your* chosen line at perfect pace; if it drops, it's a good read. Otherwise it shows under-read or over-read by how many degrees, with an arrow down for too little and up for too much. Straight putts say how far left or right you aimed. A sentence underneath gives your aim against the ideal line. When the pace was off, it also gives the line that would have holed *at the pace you hit* (read and pace are linked: firmer needs less break, softer needs more).
+  - **Launch:** launch angle against the ideal 1–2° window: "Too little loft" (driven into the turf, more skid) or "Too much loft" (the ball hops).
+- **Spin, skid and roll** distance.
+- **Face control trend:** your last 10 putts' start direction against your aim, with a ±0.5° band, the spread graded, and any left/right bias.
 
-The Square measures the ball, not the putter, so SquarePutt shows no face or path.
-
-### Diagnosis: read, start line or pace?
-
-When you choose your own start line, every putt is split into its three parts, with a one-line verdict ("Misread", "Pace cost it", "Holed — read, line and pace all good"):
-
-- **Read:** SquarePutt rolls *your* chosen line at perfect pace. If it drops, the read was good. If not, it says by how many degrees you under-read or over-read (or how far left/right of a straight putt you aimed) and what share of the break you played: "Under-read 2.1° · 26% of break". Degrees match the aim control; the percentage reads the same at any distance and is the usual coaching measure (most golfers play well under half the real break).
-- **Start line:** good within ~1.5 in at the hole (never stricter than 0.5°).
-- **Pace:** judged by where the ball ends up. Holed, or it reached the hole and finished no more than 1.5 ft past (5% of the putt on long ones). Shown with % firm/soft against the ideal pace.
-- **Read and pace are linked:** a firmer putt needs less break, a softer one more. When the pace was off, the diagnosis says which line would have holed *at the pace you hit*, that even the centre line lips out at that pace, or that no line reaches.
+During drills the same four cards pop up on the green for a few seconds.
 
 The overall grade includes the read. With **Read + line** on, the read isn't tested: you're putting on the ideal line.
 
@@ -131,7 +126,7 @@ The overall grade includes the read. With **Read + line** on, the read isn't tes
 - the average gap between your start direction and the ideal one, in degrees
 - how much of the break you play on breaking putts (100% = the ideal amount)
 - how often you under-read vs over-read
-- what cost your misses (read, start line, pace).
+- what cost your misses (read, face control, pace).
 
 ### Choosing your start line
 
@@ -141,7 +136,7 @@ Before each putt, pick the direction you intend to start the ball. You can:
 - press the **Square's own remote** (its left/right buttons come over Bluetooth)
 - use a presentation remote (its **Page Up / Page Down** buttons).
 
-Each press moves the aim **0.5°**, up to 6° either side. Hold a button to keep moving, and tap the readout to go back to straight at the hole. The box shows only the angle (e.g. "1.25° left"), and the green shows a short (~2 ft) yellow arrow from the ball. Neither gives away where your line meets the hole, so the read stays yours. Start-line results, the trend and drill spreads are then measured against this line, so you're grading your stroke, not your read. With **Help reading the putt → Read + line**, the start line is locked to the ideal line and the controls are disabled.
+Each press moves the aim **0.5°**, up to 6° either side. Hold a button (on screen or on the Square's remote) to keep moving, and tap the readout to go back to straight at the hole. The box shows only the angle (e.g. "1.5° left"), and the green shows a short (~2 ft) yellow arrow from the ball. Neither gives away where your line meets the hole, so the read stays yours. Face control, the trend and drill spreads are measured against this aim, so your stroke is graded separately from your read. With **Help reading the putt → Read + line**, the start line is locked to the ideal line and the controls are disabled.
 
 Grades use the Quintic-style tiers: **Eagle** (tour level), **Birdie**, **Par**, **Bogey**.
 

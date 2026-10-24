@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.8.0 — October 2026
+
+### Changed
+- **Last putt feedback rebuilt** around four cards, each with a ✓/✗, a direction arrow and a detail line:
+  - **Pace:** % soft/firm leads, with an arrow; speed is now the detail.
+  - **Face control:** how far off your aim the ball started. It replaces "Start line".
+  - **Read:** the share of the break played, under- or over-read.
+  - **Launch:** too much or too little loft against the ideal 1–2° window.
+
+  The verdict and the old diagnosis box are merged into these cards, and the drill pop-up shows the same four.
+- **Trend is face control consistency:** start direction against your aim for the last 10 putts, with a ±0.5° band, graded spread and left/right bias.
+- **Square remote:** left and right are swapped to match the buttons (`12 69` = left, `12 6a` = right). Holding a button now keeps stepping until it's released, with an 8 s safety stop.
+
+### Added
+- **Screen stays awake** while SquarePutt is open (Screen Wake Lock), so tablets don't dim or sleep mid-session. It needs a secure page: https, localhost, or the Chrome flag.
+
+
 ## 2.7.1 — October 2026
 
 ### Added

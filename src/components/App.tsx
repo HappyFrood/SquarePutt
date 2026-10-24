@@ -248,13 +248,32 @@ export default function App() {
       if (!busy) nudgeAim(dir);
     };
     window.addEventListener('keydown', onKey);
-    // The Square's own remote (its left / right buttons, over Bluetooth)
-    const offRemote = squareBle.onRemote((b) => {
-      if (!busy) nudgeAim(b === 'left' ? -1 : 1);
+    // The Square's own remote (its left / right buttons, over Bluetooth). Holding a button keeps
+    // stepping until it's released, like the on-screen buttons.
+    let hold: ReturnType<typeof setTimeout> | null = null;
+    let rep: ReturnType<typeof setInterval> | null = null;
+    const stopRepeat = () => {
+      if (hold) clearTimeout(hold);
+      if (rep) clearInterval(rep);
+      hold = rep = null;
+    };
+    const offRemote = squareBle.onRemote((b, pressed) => {
+      stopRepeat();
+      if (!pressed || busy) return;
+      const dir = b === 'left' ? -1 : 1;
+      nudgeAim(dir);
+      const started = Date.now();
+      hold = setTimeout(() => {
+        rep = setInterval(() => {
+          if (Date.now() - started > 8000) stopRepeat(); // a lost release message can't run away
+          else nudgeAim(dir);
+        }, 150);
+      }, 400);
     });
     return () => {
       window.removeEventListener('keydown', onKey);
       offRemote();
+      stopRepeat();
     };
   }, [mode, aimLocked, busy, nudgeAim]);
   const read = useMemo(() => readPutt(surface, ball), [surface, ball]);
@@ -362,6 +381,28 @@ export default function App() {
       }, hold)
     );
     timers.current.push(setTimeout(() => setBanner(null), ev?.kind === 'game-over' ? 5000 : 2800));
+  }, []);
+
+  // Keep the screen awake while SquarePutt is open (tablets otherwise dim and sleep mid-session).
+  // Released by the browser when the tab is hidden, so re-request on return and on any tap.
+  useEffect(() => {
+    let lock: WakeLockSentinel | null = null;
+    const request = async () => {
+      if (document.visibilityState !== 'visible' || (lock && !lock.released) || !('wakeLock' in navigator)) return;
+      try {
+        lock = await navigator.wakeLock.request('screen');
+      } catch {
+        /* not allowed yet (needs a secure page / a tap) — retried on the next tap */
+      }
+    };
+    request();
+    document.addEventListener('visibilitychange', request);
+    window.addEventListener('pointerdown', request);
+    return () => {
+      document.removeEventListener('visibilitychange', request);
+      window.removeEventListener('pointerdown', request);
+      lock?.release().catch(() => {});
+    };
   }, []);
 
   useEffect(() => {

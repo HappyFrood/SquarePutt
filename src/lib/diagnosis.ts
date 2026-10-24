@@ -1,7 +1,7 @@
 /**
- * Splits a putt into its three parts — the read, the start line, the pace — and says which
- * one cost it. The read is judged on its own: SquarePutt rolls the player's chosen line at the
- * ideal pace and checks whether it would have dropped.
+ * Splits a putt into four parts — pace, face control (start vs your aim), the read (share of the
+ * break played) and launch/loft — and says which of read, face and pace cost it. The read is
+ * judged on its own: SquarePutt rolls the player's chosen line at the ideal pace.
  */
 
 import { PuttingShotData } from './types';
@@ -11,22 +11,32 @@ export type PartState = 'good' | 'off' | 'na';
 
 export interface DiagPart {
   state: PartState;
-  /** Short result, e.g. "Under-read 3 in", "0.8° right", "12% firm". */
+  /** Main result, e.g. "12% soft", "0.8° right", "60% of the break", "Too little loft". */
   text: string;
+  /** Supporting detail, e.g. "4.1 mph · 1.2 ft short". */
+  detail?: string;
+  /** Direction for the arrow: up = firm / too much, down = soft / too little, left / right = side. */
+  dir?: 'up' | 'down' | 'left' | 'right';
 }
 
 export interface Diagnosis {
-  read: DiagPart;
-  line: DiagPart;
   pace: DiagPart;
+  /** Face control: how far off your chosen aim the ball started. */
+  face: DiagPart;
+  read: DiagPart;
+  /** Launch vs the ideal window — too much or too little loft. */
+  loft: DiagPart;
   /** One-line verdict, e.g. "Misread", "Pace cost it". */
   headline: string;
 }
 
-/** Degrees for display: 1.0°, 0.5°, 0.25° → "1°", "0.5°", "0.25°"; one decimal otherwise. */
+/** Ideal putting launch window (degrees): ball lifts out of its depression and rolls early. */
+export const LAUNCH_WINDOW: [number, number] = [1, 2];
+
+/** Degrees for display, one decimal: 1.0° → "1°", 0.5° → "0.5°", 0.19° → "0.2°". */
 export const fmtDeg = (d: number) => {
   const n = Math.abs(d);
-  return `${n >= 10 ? n.toFixed(0) : Number(n.toFixed(n < 1 ? 2 : 1)).toString()}°`;
+  return `${n >= 10 ? n.toFixed(0) : Number(n.toFixed(1)).toString()}°`;
 };
 
 /** Read numbers in degrees; older putts (stored in inches only) are converted. */
@@ -58,44 +68,72 @@ export function paceIsGood(isHoled: boolean, distanceErrorFt: number, distanceFt
 }
 
 export function diagnose(s: PuttingShotData): Diagnosis {
-  const r = s.read;
-  const rd = r ? readDegrees(s) : null;
-  const played = rd?.breakPlayedPct !== undefined ? ` · ${rd.breakPlayedPct}% of break` : '';
-  const read: DiagPart = !r || !rd
-    ? { state: 'na', text: 'Ideal line (Read + line)' }
-    : r.verdict === 'good'
-    ? { state: 'good', text: 'Holes at perfect pace' }
-    : r.verdict === 'over'
-    ? { state: 'off', text: `Over-read ${fmtDeg(rd.errorDeg)}${played}` }
-    : r.verdict === 'under'
-    ? { state: 'off', text: `Under-read ${fmtDeg(rd.errorDeg)}${played}` }
-    : { state: 'off', text: `${fmtDeg(rd.errorDeg)} ${r.verdict} of the read` };
+  // Pace: % soft / firm against the ideal pace, judged by where the ball finished
+  const pe = s.speedErrorPct;
+  const pct = pe === undefined ? '–' : Math.abs(pe) < 1 ? 'Ideal pace' : `${Math.abs(pe).toFixed(0)}% ${pe > 0 ? 'firm' : 'soft'}`;
+  const finish = s.isHoled ? 'holed' : s.distanceErrorFt < 0 ? `${Math.abs(s.distanceErrorFt).toFixed(1)} ft short` : `${s.distanceErrorFt.toFixed(1)} ft past`;
+  const pace: DiagPart = {
+    state: pe === undefined ? 'na' : paceIsGood(s.isHoled, s.distanceErrorFt, s.targetDistanceFt) ? 'good' : 'off',
+    text: pct,
+    detail: `${s.ballSpeedMph.toFixed(1)} mph · ${finish}`,
+    dir: pe === undefined || Math.abs(pe) < 1 ? undefined : pe > 0 ? 'up' : 'down',
+  };
 
+  // Face control: start direction against the aim you chose
   const le = s.startLineErrorDeg;
   const tol = lineToleranceDeg(s.targetDistanceFt);
-  const line: DiagPart =
+  const face: DiagPart =
     le === undefined
       ? { state: 'na', text: '–' }
-      : Math.abs(le) <= tol
-      ? { state: 'good', text: 'On your line' }
-      : { state: 'off', text: side(le) };
+      : {
+          state: Math.abs(le) <= tol ? 'good' : 'off',
+          text: Math.abs(le) < 0.05 ? 'Dead straight' : `${fmtDeg(le)} ${le > 0 ? 'right' : 'left'}`,
+          detail: Math.abs(le) <= tol ? 'started on your aim' : 'off your aim',
+          dir: Math.abs(le) < 0.05 ? undefined : le > 0 ? 'right' : 'left',
+        };
 
-  const pe = s.speedErrorPct;
-  const pct = pe !== undefined && Math.abs(pe) >= 1 ? `${Math.abs(pe).toFixed(0)}% ${pe > 0 ? 'firm' : 'soft'}` : 'ideal pace';
-  const pace: DiagPart = paceIsGood(s.isHoled, s.distanceErrorFt, s.targetDistanceFt)
-    ? { state: 'good', text: pe === undefined ? 'Good pace' : `Good · ${pct}` }
-    : s.distanceErrorFt < 0
-    ? { state: 'off', text: `Short · ${pct}` }
-    : { state: 'off', text: `Too firm · ${pct}` };
+  // Read: share of the break played (100% = ideal), tested at perfect pace
+  const r = s.read;
+  const rd = r ? readDegrees(s) : null;
+  let read: DiagPart;
+  if (!r || !rd) read = { state: 'na', text: 'Ideal line', detail: 'Read + line is on' };
+  else if (rd.breakPlayedPct === undefined)
+    read = {
+      state: r.verdict === 'good' ? 'good' : 'off',
+      text: 'Straight putt',
+      detail: Math.abs(rd.aimDeg) < 0.01 ? 'aimed at the hole' : `aimed ${side(rd.aimDeg)}`,
+      dir: r.verdict === 'good' || Math.abs(rd.errorDeg) < 0.01 ? undefined : rd.errorDeg > 0 ? 'right' : 'left',
+    };
+  else
+    read = {
+      state: r.verdict === 'good' ? 'good' : 'off',
+      text: r.verdict === 'good' ? 'Good read' : `${rd.breakPlayedPct}% of the break`,
+      detail: r.verdict === 'good' ? `${rd.breakPlayedPct}% of the break · holes at perfect pace` : `${r.verdict === 'over' ? 'over-read' : 'under-read'} by ${fmtDeg(rd.errorDeg)}`,
+      dir: r.verdict === 'good' ? undefined : r.verdict === 'over' ? 'up' : 'down',
+    };
 
-  const off = [read.state === 'off' && 'read', line.state === 'off' && 'start line', pace.state === 'off' && 'pace'].filter(Boolean) as string[];
+  // Launch / loft: launch angle against the ideal window
+  const v = s.vla;
+  const [lo, hi] = LAUNCH_WINDOW;
+  const loft: DiagPart =
+    v === undefined || Number.isNaN(v)
+      ? { state: 'na', text: '–' }
+      : v < lo
+      ? { state: 'off', text: 'Too little loft', detail: `launch ${v.toFixed(1)}° · ideal ${lo}–${hi}° · more skid`, dir: 'down' }
+      : v > hi
+      ? { state: 'off', text: 'Too much loft', detail: `launch ${v.toFixed(1)}° · ideal ${lo}–${hi}° · ball hops`, dir: 'up' }
+      : { state: 'good', text: 'Good launch', detail: `launch ${v.toFixed(1)}° · ${s.skidDistanceInches.toFixed(0)} in skid` };
+
+  // Headline: which of read, face, pace cost the putt (loft is shown, not blamed)
+  const off = [read.state === 'off' && 'read', face.state === 'off' && 'face', pace.state === 'off' && 'pace'].filter(Boolean) as string[];
+  const name: Record<string, string> = { read: 'the read', face: 'face control', pace: 'pace' };
   let headline: string;
-  if (s.isHoled) headline = off.length ? `Holed, despite the ${off.join(' and ')}` : 'Holed — read, line and pace all good';
-  else if (!off.length) headline = 'Unlucky — read, line and pace were all close';
-  else if (off.length === 1) headline = off[0] === 'read' ? 'Misread' : off[0] === 'start line' ? 'Start line cost it' : 'Pace cost it';
-  else if (off.length === 2) headline = `${cap(off[0])} and ${off[1]} both off`;
-  else headline = 'Read, start line and pace all off';
-  return { read, line, pace, headline };
+  if (s.isHoled) headline = off.length ? `Holed, despite ${off.map((k) => name[k]).join(' and ')}` : 'Holed — read, face and pace all good';
+  else if (!off.length) headline = 'Unlucky — read, face and pace were all close';
+  else if (off.length === 1) headline = off[0] === 'read' ? 'Misread' : off[0] === 'face' ? 'Face control cost it' : 'Pace cost it';
+  else if (off.length === 2) headline = `${cap(name[off[0]])} and ${name[off[1]]} both off`;
+  else headline = 'Read, face and pace all off';
+  return { pace, face, read, loft, headline };
 }
 
 const median = (sorted: number[]) => {
@@ -118,8 +156,8 @@ export interface ReadStats {
   overPct: number;
   /** Median share of the break played on breaking putts (100% = the ideal amount). */
   breakPlayedPct: number | null;
-  /** On missed putts: % where the read, the start line, the pace was off (each can count). */
-  missCause: { misses: number; readPct: number; linePct: number; pacePct: number } | null;
+  /** On missed putts: % where the read, face control, the pace was off (each can count). */
+  missCause: { misses: number; readPct: number; facePct: number; pacePct: number } | null;
 }
 
 export function readStats(shots: PuttingShotData[]): ReadStats | null {
@@ -144,7 +182,7 @@ export function readStats(shots: PuttingShotData[]): ReadStats | null {
       ? {
           misses: misses.length,
           readPct: (d.filter((x) => x.read.state === 'off').length / misses.length) * 100,
-          linePct: (d.filter((x) => x.line.state === 'off').length / misses.length) * 100,
+          facePct: (d.filter((x) => x.face.state === 'off').length / misses.length) * 100,
           pacePct: (d.filter((x) => x.pace.state === 'off').length / misses.length) * 100,
         }
       : null,
