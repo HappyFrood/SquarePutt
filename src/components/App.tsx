@@ -4,9 +4,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import confetti from 'canvas-confetti';
 import { AppMode, ConnectionState, PuttingShotData, PuttLayout } from '@/lib/types';
 import { AppSettings, loadSettings, saveSettings } from '@/lib/settings';
-import { GreenSurface, PuttingSurface, readPutt } from '@/lib/green';
+import { generatedGreenContains, GreenSurface, PuttingSurface, readPutt } from '@/lib/green';
 import { GreenLibrary, loadGreenLibrary, pickRealGreen, placeBallOnGreen, RealGreenSurface } from '@/lib/realGreens';
-import { PuttSetup, solveIdealStroke } from '@/lib/physicsEngine';
+import { PuttSetup, solveIdealStroke, speedForFlatDistanceMph } from '@/lib/physicsEngine';
 import { openConnectService } from '@/lib/openConnectService';
 import { squareBle, SquareStatus } from '@/lib/squareBle';
 import { getStoredShots, saveShotToHistory, getDrillBests, updateDrillBests } from '@/lib/storage';
@@ -14,17 +14,21 @@ import {
   DrillEvent,
   ballFromLayout,
   PressureConfig,
+  CircleRadiusFt,
+  CIRCLE_BALLS,
+  circleBall,
   PressureState,
   newPressure,
   pressureLayout,
   pressureOnShot,
   pressureFaceStdDev,
-  LagConfig,
-  LagState,
-  newLag,
-  lagLayout,
-  lagOnShot,
-  lagStats,
+  LeapConfig,
+  LeapState,
+  newLeap,
+  leapLayout,
+  leapOnShot,
+  LEAP_START_FT,
+  LEAP_END_FT,
   ScrambleConfig,
   ScrambleState,
   newScramble,
@@ -33,7 +37,6 @@ import {
   scrambleAdvance,
   scrambleStats,
   gimmeRadiusFt,
-  LagZone,
 } from '@/lib/drills';
 import { TopBar } from '@/components/ui/TopBar';
 import { PuttingGreenCanvas } from '@/components/green/PuttingGreenCanvas';
@@ -42,7 +45,8 @@ import { ReadChip, ResultBanner, PracticePad } from '@/components/hud/CanvasHud'
 import { LastPutt } from '@/components/hud/LastPutt';
 import { BallPlacement } from '@/components/hud/BallPlacement';
 import { AimControl } from '@/components/hud/AimControl';
-import { PressurePanel, LagPanel, ScramblePanel } from '@/components/drills/DrillPanels';
+import { PuttFlash } from '@/components/hud/PuttFlash';
+import { PressurePanel, LeapfrogPanel, ScramblePanel } from '@/components/drills/DrillPanels';
 import { SettingsDrawer } from '@/components/settings/SettingsDrawer';
 import { ConnectionDrawer } from '@/components/settings/ConnectionDrawer';
 import { StatsView } from '@/components/stats/StatsView';
@@ -61,19 +65,48 @@ const sameLayout = (a: PuttLayout, b: PuttLayout) =>
 /** Aim steps (degrees): 0.25° to 1.5°, then 0.5° to 3°, then 1° to 15°. */
 const AIM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
 
-const ZONE_COLOR: Record<LagZone, string> = {
-  holed: '#4fb3ff',
-  zone: '#4ade80',
-  'close-short': '#fbbf24',
-  long: '#a9bcb0',
-  short: '#f87171',
-  'way-long': '#f87171',
-};
+
+const CONFETTI = ['#f5c84c', '#eef2ea', '#4ade80'];
+/** Mini (milestone / level-up), mega (24 in a row) and win (level complete) celebrations. */
+function celebrate(ev: DrillEvent | null) {
+  if (!ev) return;
+  if (ev.kind === 'milestone' || ev.kind === 'level-up') {
+    audioEngine.playChime();
+    confetti({ particleCount: 90, spread: 70, origin: { y: 0.55, x: 0.4 }, colors: CONFETTI });
+  } else if (ev.kind === 'mega') {
+    audioEngine.playChime();
+    confetti({ particleCount: 160, spread: 100, origin: { y: 0.6, x: 0.25 }, angle: 60, colors: CONFETTI });
+    confetti({ particleCount: 160, spread: 100, origin: { y: 0.6, x: 0.6 }, angle: 120, colors: CONFETTI });
+    setTimeout(() => confetti({ particleCount: 120, spread: 140, startVelocity: 45, origin: { y: 0.4, x: 0.4 }, colors: CONFETTI }), 350);
+  } else if (ev.kind === 'win') {
+    audioEngine.playChime();
+    setTimeout(() => audioEngine.playChime(), 300);
+    const end = Date.now() + 2200;
+    const burst = () => {
+      confetti({ particleCount: 40, spread: 70, angle: 60, origin: { x: 0, y: 0.7 }, colors: CONFETTI });
+      confetti({ particleCount: 40, spread: 70, angle: 120, origin: { x: 0.72, y: 0.7 }, colors: CONFETTI });
+      if (Date.now() < end) setTimeout(burst, 160);
+    };
+    burst();
+    confetti({ particleCount: 250, spread: 160, startVelocity: 50, origin: { y: 0.45, x: 0.36 }, colors: CONFETTI, scalar: 1.2 });
+  }
+}
+
+function makeRandomPutt(): Omit<PuttLayout, 'holeRadiusMultiplier'> {
+  const r = Math.random;
+  const diffs: PuttLayout['difficulty'][] = ['mild', 'medium', 'hard'];
+  return {
+    seed: Math.floor(r() * 1e6),
+    difficulty: diffs[Math.floor(r() * diffs.length)],
+    distanceFt: Math.round(3 + 32 * r() ** 1.6), // weighted toward makeable lengths
+    angleRad: r() * Math.PI * 2,
+  };
+}
 
 function practiceEvent(s: PuttingShotData): DrillEvent {
   if (s.isHoled) return { kind: 'make', title: 'Holed', detail: s.speedErrorPct !== undefined ? `${Math.abs(s.speedErrorPct) < 1 ? 'Perfect pace' : `${Math.abs(s.speedErrorPct).toFixed(0)}% ${s.speedErrorPct > 0 ? 'firm' : 'soft'}`}` : undefined };
   const d = Math.abs(s.distanceErrorFt);
-  const title = s.lipOut ? 'Lipped out' : d < 0.2 ? 'Pin high' : `${d.toFixed(1)} ft ${s.distanceErrorFt < 0 ? 'short' : 'past'}`;
+  const title = s.offGreen ? 'Off the green' : s.lipOut ? 'Lipped out' : d < 0.2 ? 'Pin high' : `${d.toFixed(1)} ft ${s.distanceErrorFt < 0 ? 'short' : 'past'}`;
   const lat = Math.abs(s.lateralErrorInches);
   const parts = [];
   if (lat >= 1) parts.push(`${lat.toFixed(0)} in ${s.lateralErrorInches > 0 ? 'right' : 'left'}`);
@@ -94,19 +127,23 @@ export default function App() {
 
   const [shots, setShots] = useState<PuttingShotData[]>(getStoredShots);
   const [shot, setShot] = useState<PuttingShotData | null>(null);
+  /** The putt whose results are on screen: set only once the ball has stopped. */
+  const [shownShot, setShownShot] = useState<PuttingShotData | null>(null);
+  /** Drills: brief on-green card with the last putt's numbers. */
+  const [flash, setFlash] = useState<PuttingShotData | null>(null);
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<DrillEvent | null>(null);
   const [resetKey, setResetKey] = useState(0);
   const pendingEvent = useRef<DrillEvent | null>(null);
+  const pendingCommit = useRef<(() => void) | null>(null);
   const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const [bests, setBests] = useState(getDrillBests);
   const [filterNote, setFilterNote] = useState<string | null>(null);
 
-  const [pCfg, setPCfg] = useState<PressureConfig>({ distance: 5, lives: 3, difficulty: 'mild' });
+  const [pCfg, setPCfg] = useState<PressureConfig>({ radius: 3, difficulty: 'mild' });
   const [pState, setPState] = useState<PressureState | null>(null);
-  const [lCfg, setLCfg] = useState<LagConfig>({ distance: 'mixed', putts: 10, difficulty: 'mild' });
-  const [lState, setLState] = useState<LagState | null>(null);
-  const [lagRests, setLagRests] = useState<MarkerSpec[]>([]);
+  const [lCfg, setLCfg] = useState<LeapConfig>({ difficulty: 'mild' });
+  const [lState, setLState] = useState<LeapState | null>(null);
   const [sCfg, setSCfg] = useState<ScrambleConfig>({ holes: 9, difficulty: 'mixed' });
   const [sState, setSState] = useState<ScrambleState | null>(null);
 
@@ -125,22 +162,26 @@ export default function App() {
 
   /* ------------------------------- layout & physics ------------------------------- */
 
+  // Practice "random" mode: any green and pin, mild–hard slope, 3–35 ft.
+  const [randomPutt, setRandomPutt] = useState(makeRandomPutt);
+
   const liveLayout: PuttLayout = useMemo(() => {
     switch (mode) {
       case 'pressure-circle':
         return pState
           ? { ...pressureLayout(pState), greenRadiusM: 6.5 }
-          : { seed: 777, difficulty: pCfg.difficulty, distanceFt: pCfg.distance === 'ladder' ? 3 : pCfg.distance, angleRad: 0, holeRadiusMultiplier: 1, greenRadiusM: 6.5 };
+          : { seed: 777, difficulty: pCfg.difficulty, distanceFt: pCfg.radius, angleRad: 0, holeRadiusMultiplier: 1, greenRadiusM: 6.5 };
       case 'speed-control':
         return lState
-          ? { ...lagLayout(lState), greenRadiusM: 17.5 }
-          : { seed: 778, difficulty: lCfg.difficulty, distanceFt: lCfg.distance === 'mixed' ? 35 : lCfg.distance, angleRad: 0, holeRadiusMultiplier: 1, greenRadiusM: 17.5 };
+          ? { ...leapLayout(lState), greenRadiusM: 17.5 }
+          : { seed: 778, difficulty: lCfg.difficulty, distanceFt: LEAP_END_FT, angleRad: 0, holeRadiusMultiplier: 0, greenRadiusM: 17.5 };
       case 'scramble-gauntlet': {
         if (!sState) return { seed: 779, difficulty: 'medium', distanceFt: 18, angleRad: 0.4, holeRadiusMultiplier: 1 };
         const h = sState.holes[Math.min(sState.holeIdx, sState.holes.length - 1)];
         return { ...scrambleLayout(sState), anchor: ballFromLayout(h.startDistanceFt, h.angleRad) };
       }
       default:
+        if (settings.practiceNext === 'random') return { ...randomPutt, holeRadiusMultiplier: 1 };
         return {
           seed: settings.practiceSeed,
           difficulty: settings.practiceDifficulty,
@@ -149,7 +190,7 @@ export default function App() {
           holeRadiusMultiplier: 1,
         };
     }
-  }, [mode, pState, pCfg, lState, lCfg, sState, settings.practiceSeed, settings.practiceDifficulty, settings.practiceDistanceFt]);
+  }, [mode, pState, pCfg, lState, lCfg, sState, settings.practiceSeed, settings.practiceDifficulty, settings.practiceDistanceFt, settings.practiceNext, randomPutt]);
 
   // Freeze the green while a putt is rolling and its result is on screen.
   const [layout, setLayout] = useState<PuttLayout>(liveLayout);
@@ -169,9 +210,15 @@ export default function App() {
     if (surface instanceof RealGreenSurface) return placeBallOnGreen(surface, layout.distanceFt, layout.angleRad);
     return ballFromLayout(layout.distanceFt, layout.angleRad);
   }, [surface, layout.ball, layout.distanceFt, layout.angleRad]);
+  const onGreen = useMemo(() => {
+    if (surface instanceof RealGreenSurface) return (x: number, z: number) => surface.contains({ x, z });
+    const anchor = layout.anchor ?? ball;
+    const r = layout.greenRadiusM;
+    return (x: number, z: number) => generatedGreenContains({ x, z }, anchor, r);
+  }, [surface, layout.anchor, layout.greenRadiusM, ball]);
   const setup: PuttSetup = useMemo(
-    () => ({ surface, stimp, ball, holeRadiusMultiplier: layout.holeRadiusMultiplier, speedCalibration: settings.speedCalibration }),
-    [surface, stimp, ball, layout.holeRadiusMultiplier, settings.speedCalibration]
+    () => ({ surface, stimp, ball, holeRadiusMultiplier: layout.holeRadiusMultiplier, speedCalibration: settings.speedCalibration, onGreen }),
+    [surface, stimp, ball, layout.holeRadiusMultiplier, settings.speedCalibration, onGreen]
   );
   const idealPastM = settings.idealPastIn * 0.0254;
   const ideal = useMemo(() => solveIdealStroke({ ...setup, holeRadiusMultiplier: 1 }, idealPastM), [setup, idealPastM]);
@@ -223,60 +270,88 @@ export default function App() {
   const handleShot = (s: PuttingShotData) => {
     timers.current.forEach(clearTimeout);
     timers.current = [];
-    setShot(s);
+    setShot(s); // starts the roll on the green
+    setFlash(null);
     setBusy(true);
     setBanner(null);
     saveShotToHistory(s);
-    setShots((prev) => [{ ...s, trajectoryPoints: undefined }, ...prev].slice(0, 1000));
 
+    // Everything the player sees about the result waits until the ball stops (onRollComplete).
     let ev: DrillEvent = practiceEvent(s);
+    const commits: (() => void)[] = [
+      () => {
+        setShownShot(s);
+        if (mode !== 'analysis' && mode !== 'speed-control') {
+          setFlash(s);
+          timers.current.push(setTimeout(() => setFlash((f) => (f === s ? null : f)), 6500));
+        }
+        setShots((prev) => [{ ...s, trajectoryPoints: undefined }, ...prev].slice(0, 1000));
+      },
+    ];
     if (mode === 'pressure-circle' && pState) {
       const r = pressureOnShot(pState, s);
-      setPState(r.state);
       ev = r.event;
-      if (r.state.bestStreak > 0) {
-        updateDrillBests({ pressureCircle: { bestStreak: r.state.bestStreak, lowestFaceStdDev: r.state.faceAngles.length >= 5 ? pressureFaceStdDev(r.state) : 999, lastUpdated: Date.now() } });
-      }
+      commits.push(() => {
+        setPState(r.state);
+        if (r.state.bestRun > 0) {
+          updateDrillBests({ pressureCircle: { bestStreak: r.state.bestRun, lowestFaceStdDev: r.state.faceAngles.length >= 5 ? pressureFaceStdDev(r.state) : 999, lastUpdated: Date.now() } });
+        }
+      });
     } else if (mode === 'speed-control' && lState) {
-      const r = lagOnShot(lState, s);
-      setLState(r.state);
+      const r = leapOnShot(lState, s);
       ev = r.event;
-      const last = r.state.results[r.state.results.length - 1];
-      setLagRests((m) => [...m, { x: s.rest.x, z: s.rest.z, color: ZONE_COLOR[last.zone] }]);
-      if (r.state.status === 'over') {
-        updateDrillBests({ speedControl: { highScore: r.state.score, lowestSpeedStdDev: lagStats(r.state).distanceStdDevFt, lastUpdated: Date.now() } });
-      }
+      commits.push(() => {
+        setLState(r.state);
+        if (r.state.best > 0) updateDrillBests({ leapfrog: { best: r.state.best, lastUpdated: Date.now() } });
+      });
     } else if (mode === 'scramble-gauntlet' && sState) {
       const r = scrambleOnShot(sState, s);
-      setSState(r.state);
       ev = r.event;
-      if (r.state.status === 'over') {
-        const st = scrambleStats(r.state);
-        updateDrillBests({ scrambleGauntlet: { highestStrokesGained: st.sgPer18, lowestCepInches: st.cepInches, lastUpdated: Date.now() } });
-      }
+      commits.push(() => {
+        setSState(r.state);
+        if (r.state.status === 'over') {
+          const st = scrambleStats(r.state);
+          updateDrillBests({ scrambleGauntlet: { highestStrokesGained: st.sgPer18, lowestCepInches: st.cepInches, lastUpdated: Date.now() } });
+        }
+      });
     }
     pendingEvent.current = ev;
+    pendingCommit.current = () => commits.forEach((c) => c());
   };
   const handleShotRef = useRef(handleShot);
   useEffect(() => {
     handleShotRef.current = handleShot;
   });
 
+  const practiceNextRef = useRef<{ mode: AppMode; next: AppSettings['practiceNext']; shot: PuttingShotData | null }>({ mode: 'analysis', next: 'same', shot: null });
+  useEffect(() => {
+    practiceNextRef.current = { mode, next: settings.practiceNext, shot };
+  });
+  const cameraRef = useRef(settings.camera);
+  useEffect(() => {
+    cameraRef.current = settings.camera;
+  }, [settings.camera]);
   const onRollComplete = useCallback(() => {
+    pendingCommit.current?.();
+    pendingCommit.current = null;
     const ev = pendingEvent.current;
     pendingEvent.current = null;
     setBanner(ev);
-    if (ev && (ev.kind === 'milestone' || ev.kind === 'level-up')) {
-      audioEngine.playChime();
-      confetti({ particleCount: 90, spread: 70, origin: { y: 0.55, x: 0.4 }, colors: ['#f5c84c', '#eef2ea', '#4ade80'] });
-    }
+    celebrate(ev);
     setBests(getDrillBests());
-    const hold = ev?.kind === 'game-over' ? 600 : 1900;
+    // Putter view flies to where the ball stopped: give it time to arrive and be seen.
+    const hold = ev?.kind === 'game-over' ? 600 : cameraRef.current === 'behind' ? 3200 : 1900;
     timers.current.push(
       setTimeout(() => {
         setBusy(false);
         setResetKey((k) => k + 1);
         setSState((st) => (st && st.status === 'hole-complete' ? scrambleAdvance(st) : st));
+        // Practice: move on to a new putt if the player asked for that
+        const nx = practiceNextRef.current;
+        if (nx.mode === 'analysis' && nx.shot) {
+          if (nx.next === 'random') setRandomPutt(makeRandomPutt());
+          else if (nx.next === 'new-on-make' && nx.shot.isHoled) setSettings((p) => ({ ...p, practiceSeed: p.practiceSeed + 1 }));
+        }
       }, hold)
     );
     timers.current.push(setTimeout(() => setBanner(null), ev?.kind === 'game-over' ? 5000 : 2800));
@@ -310,16 +385,18 @@ export default function App() {
     timers.current.forEach(clearTimeout);
     timers.current = [];
     pendingEvent.current = null;
+    pendingCommit.current?.(); // a putt still rolling when switching: record it now
+    pendingCommit.current = null;
     setMode(m);
     setBusy(false);
     setBanner(null);
     setShot(null);
+    setFlash(null);
   };
 
   /* ------------------------------ scene decorations ------------------------------ */
 
   const rings: RingSpec[] = useMemo(() => {
-    if (mode === 'speed-control') return [{ radiusFt: 3, color: '#4ade80', fill: true, pastOnly: true }, { radiusFt: 3, color: '#a9bcb0' }];
     if (mode === 'scramble-gauntlet' && sState) {
       const d = layout.ball ? Math.hypot(layout.ball.x, layout.ball.z) * 3.28084 : layout.distanceFt;
       return [{ radiusFt: gimmeRadiusFt(d), color: '#4fb3ff' }];
@@ -327,7 +404,21 @@ export default function App() {
     return [];
   }, [mode, sState, layout]);
 
-  const markers = mode === 'speed-control' ? lagRests : [];
+  const markers: MarkerSpec[] = useMemo(() => [], []);
+  // Pressure circle: the rest of this set of 12 sits around the hole, waiting its turn.
+  // Leapfrog: the balls of this round stay where they finished.
+  const waitingBalls = useMemo(() => {
+    if (mode === 'speed-control' && lState) return lState.balls.map((b) => ({ x: b.x, z: b.z }));
+    if (mode !== 'pressure-circle' || !pState || pState.status !== 'playing') return [];
+    return Array.from({ length: CIRCLE_BALLS - pState.ballIdx - 1 }, (_, k) => circleBall(pState, pState.ballIdx + 1 + k));
+  }, [mode, pState, lState]);
+  // Leapfrog has no cup: virtual putts aim about a foot past the last ball instead.
+  const padIdeal = useMemo(() => {
+    if (mode !== 'speed-control' || !lState) return ideal;
+    const lastFt = lState.balls.length ? lState.balls[lState.balls.length - 1].ft : LEAP_START_FT;
+    return { ...ideal, ballSpeedMph: speedForFlatDistanceMph(lastFt + 1, stimp) };
+  }, [mode, lState, ideal, stimp]);
+  const ladder = useMemo(() => (mode === 'speed-control' ? { fromFt: LEAP_START_FT, toFt: LEAP_END_FT, stepFt: 3 } : null), [mode]);
   const overlays = useMemo(
     () => ({ grid: settings.grid, contours: settings.contours, heatmap: settings.heatmap, fallLines: settings.fallLines, aimLine: settings.aimLine }),
     [settings.grid, settings.contours, settings.heatmap, settings.fallLines, settings.aimLine]
@@ -346,23 +437,22 @@ export default function App() {
         config={pCfg}
         onConfig={setPCfg}
         onStart={() => setPState(newPressure(pState?.cfg ?? pCfg))}
+        onNextLevel={() => {
+          const cfg = { ...(pState?.cfg ?? pCfg), radius: Math.min(4, (pState?.cfg.radius ?? pCfg.radius) + 1) as CircleRadiusFt };
+          setPCfg(cfg);
+          setPState(newPressure(cfg));
+        }}
         onReset={() => setPState(null)}
         best={bests.pressureCircle.bestStreak}
       />
     ) : mode === 'speed-control' ? (
-      <LagPanel
+      <LeapfrogPanel
         state={lState}
         config={lCfg}
         onConfig={setLCfg}
-        onStart={() => {
-          setLagRests([]);
-          setLState(newLag(lState?.cfg ?? lCfg));
-        }}
-        onReset={() => {
-          setLagRests([]);
-          setLState(null);
-        }}
-        best={bests.speedControl.highScore}
+        onStart={() => setLState(newLeap(lState?.cfg ?? lCfg))}
+        onReset={() => setLState(null)}
+        best={bests.leapfrog.best}
       />
     ) : mode === 'scramble-gauntlet' ? (
       <ScramblePanel
@@ -385,6 +475,8 @@ export default function App() {
         <main className="min-h-0 flex-1">
           <StatsView
             shots={shots}
+            baseline={settings.statsBaseline}
+            onBaseline={(b) => patch({ statsBaseline: b })}
             onDataChanged={() => {
               setShots(getStoredShots());
               setBests(getDrillBests());
@@ -408,10 +500,13 @@ export default function App() {
               resetKey={resetKey}
               exaggeration={3}
               aimDeg={aimHlaDeg}
+              waitingBalls={waitingBalls}
+              ladder={ladder}
               onRollComplete={onRollComplete}
             />
-            <ReadChip read={read} ideal={settings.readAssist === 'off' ? null : ideal} assist={settings.readAssist} stimp={stimp} greenLabel={surface.label} rating={surface instanceof RealGreenSurface ? surface.difficulty : undefined} />
+            {mode !== 'speed-control' && <ReadChip read={read} ideal={settings.readAssist === 'off' ? null : ideal} assist={settings.readAssist} stimp={stimp} greenLabel={surface.label} rating={surface instanceof RealGreenSurface ? surface.difficulty : undefined} />}
             <ResultBanner event={banner} />
+            <PuttFlash shot={flash} onClose={() => setFlash(null)} />
             {waitingForSetup && !banner && (
               <div className="pointer-events-none absolute bottom-8 left-1/2 -translate-x-1/2 rounded-full bg-club-950/85 px-5 py-2 text-sm text-mist ring-1 ring-line">
                 Set up the drill on the right, then press start
@@ -420,7 +515,7 @@ export default function App() {
             {filterNote && (
               <div className="absolute right-4 top-4 z-10 max-w-xs rounded-xl bg-club-950/90 px-4 py-2 text-sm text-mist ring-1 ring-line">{filterNote}</div>
             )}
-            {!live && <PracticePad ideal={ideal} aimDeg={aimHlaDeg} disabled={busy || !drillPlaying} />}
+            {!live && <PracticePad ideal={padIdeal} aimDeg={aimHlaDeg} disabled={busy || !drillPlaying} />}
             {!waitingForSetup && (
               <AimControl
                 aimDeg={aimHlaDeg}
@@ -435,7 +530,7 @@ export default function App() {
 
           <aside className="w-[400px] shrink-0 space-y-4 overflow-y-auto border-l border-line bg-club-950 p-4">
             {drillPanel}
-            <LastPutt shot={shot && shot.mode === mode ? shot : recent[0] ?? null} recent={recent} />
+            <LastPutt shot={shownShot && shownShot.mode === mode ? shownShot : recent[0] ?? null} recent={recent} />
           </aside>
         </main>
       )}

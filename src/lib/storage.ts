@@ -27,6 +27,11 @@ export interface DrillBests {
     lowestCepInches: number;
     lastUpdated: number;
   };
+  /** Leapfrog ladder: most balls fitted in one round. */
+  leapfrog: {
+    best: number;
+    lastUpdated: number;
+  };
 }
 
 const DEFAULT_PROFILE: UserProfile = {
@@ -41,6 +46,7 @@ const DEFAULT_DRILL_BESTS: DrillBests = {
   pressureCircle: { bestStreak: 0, lowestFaceStdDev: 999, lastUpdated: 0 },
   speedControl: { highScore: 0, lowestSpeedStdDev: 999, lastUpdated: 0 },
   scrambleGauntlet: { highestStrokesGained: -999, lowestCepInches: 999, lastUpdated: 0 },
+  leapfrog: { best: 0, lastUpdated: 0 },
 };
 
 export const DISTANCE_BUCKETS: { label: string; min: number; max: number }[] = [
@@ -138,6 +144,9 @@ export function updateDrillBests(partial: Partial<DrillBests>): void {
         lowestCepInches: Math.min(current.scrambleGauntlet.lowestCepInches, partial.scrambleGauntlet.lowestCepInches || 999),
         lastUpdated: Date.now(),
       };
+    }
+    if (partial.leapfrog) {
+      updated.leapfrog = { best: Math.max(current.leapfrog.best, partial.leapfrog.best), lastUpdated: Date.now() };
     }
     localStorage.setItem(STORAGE_KEY_DRILL_BESTS, JSON.stringify(updated));
   } catch (e) {

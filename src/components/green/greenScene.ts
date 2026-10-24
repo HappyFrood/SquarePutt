@@ -140,7 +140,9 @@ export class GreenScene {
   private ball: Vec2 = { x: 0, z: -3 };
   private holeMult = 1;
   private overlays: SceneOverlays = { grid: true, contours: false, heatmap: false, fallLines: true, aimLine: true };
-  private cameraMode: CameraMode = 'behind';
+  private cameraMode: CameraMode = 'follow';
+  /** Ball has stopped after a putt (not holed): putter view moves behind it. */
+  private atRest = false;
 
   // objects
   private terrain!: THREE.Mesh;
@@ -175,6 +177,13 @@ export class GreenScene {
   private overlayGroup = new THREE.Group();
   private ringGroup = new THREE.Group();
   private markerGroup = new THREE.Group();
+  /** Other balls waiting to be putted (Pressure circle). Display only: no collisions. */
+  private waitingGroup = new THREE.Group();
+  private waitingGeo!: THREE.SphereGeometry;
+  private waitingMat!: THREE.Material;
+  private waitingSpots: Vec2[] = [];
+  private ladderGroup = new THREE.Group();
+  private ladder: { fromFt: number; toFt: number; stepFt: number } | null = null;
   private trail: Line2 | null = null;
   private idealLine: Line2 | null = null;
   private aimDeg = 0;
@@ -425,6 +434,8 @@ vec3 spEmit = vec3(0.0);
     // Ball
     const ballMat = new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 0.35, normalMap: dimpleTexture(), normalScale: new THREE.Vector2(0.5, 0.5) });
     this.ballMesh = new THREE.Mesh(new THREE.SphereGeometry(BALL_RADIUS_M, 40, 24), ballMat);
+    this.waitingGeo = new THREE.SphereGeometry(BALL_RADIUS_M, 24, 16);
+    this.waitingMat = ballMat;
     this.ballMesh.castShadow = true;
     s.add(this.ballMesh);
     this.ballShadow = new THREE.Mesh(
@@ -433,7 +444,7 @@ vec3 spEmit = vec3(0.0);
     );
     s.add(this.ballShadow);
 
-    s.add(this.cup, this.pin, this.overlayGroup, this.ringGroup, this.markerGroup);
+    s.add(this.cup, this.pin, this.overlayGroup, this.ringGroup, this.markerGroup, this.waitingGroup, this.ladderGroup);
     this.buildPin();
   }
 
@@ -523,12 +534,15 @@ vec3 spEmit = vec3(0.0);
     const key = `${this.exag}|${surface.label ?? ''}|${surface.difficulty}|${surface.seed}|${surface.stimp}|${anchor.x.toFixed(3)}|${anchor.z.toFixed(3)}|${outline.radiusM ?? 0}`;
     this.surface = surface;
     this.ball = { ...ball };
+    this.atRest = false;
     this.holeMult = holeMult;
     this.stopPlayback();
     if (key !== this.terrainKey) {
       this.terrainKey = key;
       this.rebuildTerrain(anchor, outline.radiusM);
     }
+    this.placeWaitingBalls();
+    this.drawLadder();
     this.rebuildCup();
     this.rebuildOverlays();
     this.placeBall(ball.x, this.hh(ball.x, ball.z), ball.z, null);
@@ -613,6 +627,53 @@ vec3 spEmit = vec3(0.0);
         pts.push(this.drape(Math.cos(a) * R, Math.sin(a) * R, 0.004));
       }
       this.ringGroup.add(this.fat(pts, r.color, 2.5, 0.9));
+    }
+  }
+
+  /** Leapfrog ladder: rungs across the line from the ball toward the pin, every stepFt from fromFt to toFt. */
+  setLadder(spec: { fromFt: number; toFt: number; stepFt: number } | null) {
+    this.ladder = spec;
+    this.drawLadder();
+  }
+
+  private drawLadder() {
+    this.ladderGroup.children.forEach((c) => (c as THREE.Mesh).geometry?.dispose());
+    this.ladderGroup.clear();
+    const L = this.ladder;
+    if (!L) return;
+    const d = Math.hypot(this.ball.x, this.ball.z) || 1;
+    const ux = -this.ball.x / d;
+    const uz = -this.ball.z / d;
+    const half = 0.6; // rung half-width (m)
+    const at = (ft: number, side: number) => {
+      const u = ft * 0.3048;
+      return this.drape(this.ball.x + ux * u + uz * side, this.ball.z + uz * u - ux * side, 0.004);
+    };
+    for (let ft = L.fromFt; ft <= L.toFt + 1e-6; ft += L.stepFt) {
+      const end = Math.abs(ft - L.fromFt) < 1e-6 || Math.abs(ft - L.toFt) < 1e-6;
+      const pts = Array.from({ length: 9 }, (_, i) => at(ft, -half + (2 * half * i) / 8));
+      const color = Math.abs(ft - L.toFt) < 1e-6 ? '#f87171' : end ? '#ffffff' : '#d7e3db';
+      this.ladderGroup.add(this.fat(pts, color, end ? 3 : 1.5, end ? 0.95 : 0.45));
+    }
+    for (const side of [-half, half]) {
+      const pts = Array.from({ length: 31 }, (_, i) => at(L.fromFt + ((L.toFt - L.fromFt) * i) / 30, side));
+      this.ladderGroup.add(this.fat(pts, '#d7e3db', 1.5, 0.45));
+    }
+  }
+
+  /** Show balls waiting their turn at these spots (sitting on the displayed surface). */
+  setWaitingBalls(spots: Vec2[]) {
+    this.waitingSpots = spots.map((p) => ({ ...p }));
+    this.placeWaitingBalls();
+  }
+
+  private placeWaitingBalls() {
+    this.waitingGroup.clear();
+    for (const p of this.waitingSpots) {
+      const m = new THREE.Mesh(this.waitingGeo, this.waitingMat);
+      m.castShadow = true;
+      m.position.copy(toThree(p.x, this.hh(p.x, p.z) + BALL_RADIUS_M, p.z));
+      this.waitingGroup.add(m);
     }
   }
 
@@ -715,6 +776,7 @@ vec3 spEmit = vec3(0.0);
 
   /** Return the ball to its starting spot after a putt, keeping the trail visible. */
   resetBall() {
+    this.atRest = false;
     this.playing = false;
     this.traj = null;
     this.placeBall(this.ball.x, this.hh(this.ball.x, this.ball.z), this.ball.z, null);
@@ -842,7 +904,7 @@ vec3 spEmit = vec3(0.0);
 
   private updatePinVisibility() {
     const d = Math.hypot(this.ball.x, this.ball.z) * 3.28084;
-    this.pin.visible = d > 14;
+    this.pin.visible = d > 14 && this.holeMult > 0.01; // no pin when there's no cup (Leapfrog)
   }
 
   private resetBeads() {
@@ -919,6 +981,7 @@ vec3 spEmit = vec3(0.0);
       }
       if (fi >= n) {
         this.playing = false;
+        this.atRest = this.dropIndex < 0; // putter view flies to where the ball stopped (unless holed)
         this.cb.onRollComplete?.();
       }
     }
@@ -964,8 +1027,8 @@ vec3 spEmit = vec3(0.0);
       }
       case 'follow': {
         // Chase camera: ball sits in the lower part of the frame, at address and while rolling.
-        const back = 1.3;
-        wantPos = ball.clone().sub(dir.clone().multiplyScalar(back)).add(new THREE.Vector3(0, 0.8, 0));
+        const back = 1.56;
+        wantPos = ball.clone().sub(dir.clone().multiplyScalar(back)).add(new THREE.Vector3(0, 0.96, 0));
         wantLook = ball.clone().add(dir.clone().multiplyScalar(Math.min(dist, 1.5)));
         break;
       }
@@ -977,12 +1040,13 @@ vec3 spEmit = vec3(0.0);
         break;
       }
       default: {
-        // Behind the ball, roughly at a reading crouch for short putts, standing for long.
-        const startBall = toThree(this.ball.x, this.hh(this.ball.x, this.ball.z), this.ball.z);
+        // Putter view: behind the ball at address, roughly at a reading crouch for short putts and
+        // standing for long ones. Holds still during the roll, then flies to where the ball stopped.
+        const startBall = this.atRest ? ball.clone().setY(ball.y - BALL_RADIUS_M) : toThree(this.ball.x, this.hh(this.ball.x, this.ball.z), this.ball.z);
         const sdir = hole.clone().sub(startBall).setY(0).normalize();
         const sdist = Math.max(0.6, hole.clone().sub(startBall).setY(0).length());
-        const back = 1.1 + sdist * 0.12;
-        const height = 0.75 + sdist * 0.07;
+        const back = (1.1 + sdist * 0.12) * 1.2;
+        const height = (0.75 + sdist * 0.07) * 1.2;
         wantPos = startBall.clone().sub(sdir.clone().multiplyScalar(back)).add(new THREE.Vector3(0, height, 0));
         wantLook = startBall.clone().lerp(hole, 0.62);
       }

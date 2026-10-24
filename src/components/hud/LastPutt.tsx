@@ -6,10 +6,13 @@ import { analyzeDynamicLoft, calculateStdDev, gradeFaceAngleVariance } from '@/l
 import { Grade, Panel } from '@/components/ui/controls';
 import { Check, X } from 'lucide-react';
 import { diagnose, DiagPart, fmtDeg, readDegrees } from '@/lib/diagnosis';
+import { leapDistanceFt } from '@/lib/drills';
 
 
 function outcome(s: PuttingShotData) {
+  if (s.noHole) return s.offGreen ? 'Off the green' : `Finished ${leapDistanceFt(s).toFixed(1)} ft out`;
   if (s.isHoled) return 'Holed';
+  if (s.offGreen) return 'Off the green';
   const dist = Math.abs(s.distanceErrorFt);
   const lat = Math.abs(s.lateralErrorInches);
   const parts: string[] = [];
@@ -36,7 +39,7 @@ export function LastPutt({ shot, recent }: { shot: PuttingShotData | null; recen
       <div className="border-b border-line px-5 py-4">
         <div className="flex items-baseline justify-between">
           <h3 className="text-sm font-semibold text-mist">Last putt</h3>
-          <Grade grade={shot.grades.overallGrade} />
+          {!shot.noHole && <Grade grade={shot.grades.overallGrade} />}
         </div>
         <p className={`num mt-1 text-3xl font-semibold leading-tight ${shot.isHoled ? 'text-birdie' : 'text-chalk'}`}>{outcome(shot)}</p>
       </div>
@@ -46,8 +49,8 @@ export function LastPutt({ shot, recent }: { shot: PuttingShotData | null; recen
           label="Ball speed"
           value={shot.ballSpeedMph.toFixed(1)}
           unit="mph"
-          note={speedErr !== undefined ? `${Math.abs(speedErr) < 1 ? 'Ideal pace' : `${Math.abs(speedErr).toFixed(0)}% ${speedErr > 0 ? 'firm' : 'soft'}`}` : undefined}
-          grade={shot.grades.speedConsistencyGrade}
+          note={speedErr !== undefined && !shot.noHole ? `${Math.abs(speedErr) < 1 ? 'Ideal pace' : `${Math.abs(speedErr).toFixed(0)}% ${speedErr > 0 ? 'firm' : 'soft'}`}` : undefined}
+          grade={shot.noHole ? undefined : shot.grades.speedConsistencyGrade}
         />
         <Metric
           label="Start line"
@@ -58,7 +61,7 @@ export function LastPutt({ shot, recent }: { shot: PuttingShotData | null; recen
         />
       </div>
 
-      <Diagnosis shot={shot} />
+      {!shot.noHole && <Diagnosis shot={shot} />}
 
       <div className="grid grid-cols-4 gap-px border-t border-line bg-line text-center">
         <Small label="Launch" value={`${shot.vla.toFixed(1)}°`} tone={loft.status === 'optimal' ? 'text-birdie' : 'text-par'} />
@@ -68,17 +71,17 @@ export function LastPutt({ shot, recent }: { shot: PuttingShotData | null; recen
       </div>
       {loft.status !== 'optimal' && <p className="bg-club-900 px-5 py-2 text-xs text-mist">{loft.status === 'low' ? 'Low launch: ball is driven into the turf — check shaft lean.' : 'High launch: the ball hops — reduce dynamic loft.'}</p>}
 
-      {recent.length >= 3 && <Trend recent={recent.slice(0, 10)} />}
+      {recent.length >= 3 && !shot.noHole && <Trend recent={recent.slice(0, 10)} />}
     </Panel>
   );
 }
 
-function Metric({ label, value, unit, note, grade }: { label: string; value: string; unit: string; note?: string; grade: PuttingShotData['grades']['overallGrade'] }) {
+function Metric({ label, value, unit, note, grade }: { label: string; value: string; unit: string; note?: string; grade?: PuttingShotData['grades']['overallGrade'] }) {
   return (
     <div className="bg-club-900 px-5 py-3">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium text-fog">{label}</span>
-        <Grade grade={grade} />
+        {grade && <Grade grade={grade} />}
       </div>
       <div className="num mt-0.5 text-4xl font-semibold leading-none">
         {value}
@@ -170,7 +173,7 @@ function ReadLine({ shot }: { shot: PuttingShotData }) {
   const dir = (v: number) => (Math.abs(v) < 0.01 ? 'straight at the hole' : `${fmtDeg(v)} ${v > 0 ? 'right' : 'left'}`);
   return (
     <p className="mt-2 text-xs text-mist">
-      You aimed {dir(d.aimDeg)}; the read needed {dir(d.idealDeg)}
+      You aimed {dir(d.aimDeg)}; the ideal line was {dir(d.idealDeg)}
       {d.breakPlayedPct !== undefined ? ` — you played ${d.breakPlayedPct}% of the break` : ''}.
       {shot.read?.paceLineDeg !== undefined && shot.speedErrorPct !== undefined && (
         <>

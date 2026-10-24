@@ -1,4 +1,5 @@
 import { CameraMode, ReadAssist, SlopeDifficulty } from './types';
+import type { Baseline } from './baselines';
 
 export interface AppSettings {
   stimp: number;
@@ -20,6 +21,11 @@ export interface AppSettings {
   greenSource: 'real' | 'generated';
   /** Ideal pace: how far past the hole the ball would stop (inches) if it missed the cup. */
   idealPastIn: IdealPastIn;
+  /** Practice: what comes after each putt. */
+  practiceNext: 'same' | 'new-on-make' | 'random';
+  settingsRev?: number;
+  /** Stats: who to compare against (strokes gained and make rates). */
+  statsBaseline: Baseline;
 }
 
 export type IdealPastIn = 6 | 8.5 | 12 | 17;
@@ -29,7 +35,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   practiceDistanceFt: 10,
   practiceDifficulty: 'mild',
   practiceSeed: 4242,
-  camera: 'behind',
+  camera: 'follow',
   grid: true,
   contours: false,
   heatmap: false,
@@ -40,6 +46,9 @@ export const DEFAULT_SETTINGS: AppSettings = {
   slopeExaggeration: 3,
   greenSource: 'real',
   idealPastIn: 8.5,
+  practiceNext: 'same',
+  settingsRev: 2,
+  statsBaseline: 'tour',
 };
 
 const KEY = 'squareputt_settings_v2';
@@ -49,7 +58,12 @@ export function loadSettings(): AppSettings {
   try {
     const raw = localStorage.getItem(KEY);
     // Slope display is fixed at 3× (no longer a user setting).
-    if (raw) return { ...DEFAULT_SETTINGS, ...JSON.parse(raw), slopeExaggeration: 3 };
+    if (raw) {
+      const saved = JSON.parse(raw);
+      // rev 2: Follow became the default camera — move everyone to it once.
+      const migrated = saved.settingsRev === 2 ? {} : { camera: 'follow' as const, settingsRev: 2 };
+      return { ...DEFAULT_SETTINGS, ...saved, ...migrated, slopeExaggeration: 3 };
+    }
   } catch {
     /* ignore */
   }

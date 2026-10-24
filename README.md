@@ -66,34 +66,48 @@ For other GSPro-compatible monitors: close GSPro, run `npm run bridge` in a seco
 ### Practice
 Free putting at any distance (3–50 ft), slope (Flat, Mild, Medium, Hard) and green speed (stimp 9–12). **New green** generates a different contour. The read panel tells you the putt like a caddie would: distance, uphill/downhill in inches, break direction and slope %, where to aim ("inside left edge", "1.5 cups right") and the ideal ball speed.
 
+**After each putt** (Settings): stay on the **same putt**, move to a **new green after a make**, or play a **random** putt every time (any green and pin, mild to hard slope, 3–35 ft).
+
 ### Short putts — Pressure circle
-Survival drill from 3, 5 or 8 ft, or a **3→8 ft ladder** (three makes in a row moves you back a foot, a miss moves you up). Every putt comes from a different position around the hole, so each one breaks differently and has to be read. Makes in a row shrink the cup (to a minimum of 2.55″). Choose one, three or five lives. Tracks streak, make %, and start-line spread (against your chosen line) graded Eagle → Bogey.
+Twelve balls sit evenly around a random hole on a **2, 3 or 4 ft circle** (your choice), all shown on the green. Each comes from a different side, so every putt breaks differently. Putt them in order around the clock:
+- **12 in a row:** mini celebration, then 12 new balls on the same hole.
+- **24 in a row:** mega celebration, then 12 more.
+- **36 in a row:** you win the level, with the option to move up to the next circle size.
+- **A miss:** start again from ball 1 on a different hole.
 
-### Lag putts — Speed control
-Sets of 10 or 15 putts at 20, 30, 50 ft or **mixed 20–50 ft** (recommended: changing length every putt builds feel that transfers to the course).
+The panel tracks your run, which ball you're on in the set, best run, make %, holes played and start-line spread.
 
-| Finish | Points |
-|---|---|
-| Holed | +5 |
-| Past the hole, within 3 ft | +3 |
-| Within 3 ft but short | +1 |
-| 3–6 ft long | 0 |
-| Short (outside 3 ft), or over 6 ft long | −1 |
-| Third good putt in a row, and each after | +1 combo bonus |
+### Lag putts — Leapfrog
+The classic pace-control ladder, for feeling small, step-by-step changes in distance. Every putt goes from the same spot along a 30 ft ladder drawn on the green (rungs every 3 ft, red line at 30 ft, no hole).
+- Roll the first ball just past the **3 ft rung**.
+- Roll each next ball **just past the previous one**, as close to it as you can. The balls stay on the green where they finished.
+- A ball that comes up **short of the last one**, or rolls **past the 30 ft line** (or off the green), ends the round, and you start again on a **different green**.
+- **Your score** is how many balls you fitted in.
 
-The 3 ft zone is drawn on the green, and every finish in the set stays marked. Tracks front-to-back distance spread.
+The panel shows a ladder strip with each ball's finish, the room left, your best and your recent rounds. Leapfrog putts have no hole, so they're left out of make %, strokes gained and reading stats.
 
 ### The Scramble
 A 9- or 18-hole putting round. Each hole is a new green, distance (6–40 ft) and break. You putt out from wherever the ball stops; anything inside the gimme circle is given (gimme grows with putt length, 1.5–3.8 ft). Par is two putts per hole. Shows score to par, a scorecard, and **strokes gained** against the PGA Tour putting baseline, plus one-putts, three-putts and first-putt proximity.
 
 ### Stats
-Make % by distance against the PGA Tour average, a scatter of where missed putts finish, average pace and start-line bias against the ideal stroke, personal bests, and export / import / clear of your data. Filter by under 10 ft, 10–20 ft, or 20 ft+.
+Pick who to compare against: **PGA Tour, scratch, 5, 10, 15 or 20 handicap**. Then see:
+- **Strokes gained** per putt, per 18 holes and in total, and per distance band. Each putt scores expected putts from where it started − 1 − expected putts from where it finished.
+- **Make % by distance** with that baseline marked.
+- A scatter of where missed putts finish.
+- Average pace and start-line bias.
+- Green-reading accuracy.
+- Personal bests, and export / import / clear of your data.
+
+Filter by under 10 ft, 10–20 ft or 20 ft+.
+
+Baselines: the PGA Tour figures are Broadie's ShotLink table. The amateur ones are built from Shot Scope make rates by handicap (published by MyGolfSpy, 2025) plus a 3-putt chance shaped like the Tour's and scaled to Lou Stagner's Arccos 3-putt rates from ~38 ft. Nobody publishes full expected-putts tables by handicap, so treat them as close approximations (`src/lib/baselines.ts`).
 
 ---
 
 ## What you see after each putt
 
-- **Result:** holed, lipped out, or e.g. "2.1 ft short, 3 in left".
+- Everything appears **when the ball stops**, not when it's struck: result, grades, markers and drill scores.
+- **Result:** holed, lipped out, off the green, or e.g. "2.1 ft short, 3 in left".
 - **Ball speed** and how it compares with the ideal speed for that putt ("4% firm").
 - **Start line** and how far it was from the start line you chose ("0.5° right of your line").
 - **Launch angle, spin, skid and roll distance**, with a note if launch is too low or high.
@@ -188,7 +202,15 @@ Plain Three.js, kept lightweight: one terrain mesh, a sky, a distant treeline. A
 - **Height map:** red high, blue low
 - **Aim arrow** (a short yellow arrow from the ball in your chosen start direction; always shown) and **ideal line**
 
-Cameras: behind the ball, follow, overhead, and free (drag to rotate, scroll to zoom).
+Cameras:
+- **Follow** (default): chases the ball, set back a little so more of the green is in view.
+- **Putter view:** behind the ball at address, set back a little. Holds still during the roll, then flies behind the ball where it stopped, looking at the hole.
+- **Overhead**.
+- **Free:** drag to rotate, scroll to zoom.
+
+During drills, a short card with the putt's result appears at the top of the green for about 7 s (click to dismiss), since the drill panel pushes the full Last putt panel down the sidebar.
+
+**Rolling off the green:** the roll is cut short just after the ball leaves the putting surface, and you're never asked to putt from off the green. In the Scramble the hole ends (+1 stroke). In the other drills it's a miss, and the next putt comes up.
 
 ### Sound (`src/components/ui/AudioEngine.ts`)
 Synthesized, no audio files. The cup drop is physically modelled: the ball falls ~85 mm onto the cup bottom and rebounds with shrinking gaps, each impact ringing resonances tuned to a plastic cup, slightly different every time. To use a recording instead, put it at `public/sounds/cup-drop.mp3`.

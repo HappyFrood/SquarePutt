@@ -1,5 +1,40 @@
 # Changelog
 
+## 2.7.0 — October 2026
+
+### Changed
+- **Lag putts are now the Leapfrog drill.** Putt from one spot along a 30 ft ladder (rungs every 3 ft, no hole): the first ball just past the 3 ft rung, then each ball just past the previous one. Short of the last ball, or past 30 ft, ends the round, and your score is how many balls fit. Every round is on a different green. Balls stay on the green where they finished. The panel shows a ladder strip, room left, best and recent rounds. Virtual putts aim about a foot past the last ball.
+- Leapfrog putts have no hole, so they're left out of make %, strokes gained and reading stats, and the Last putt panel just shows how far out the ball finished.
+
+
+## 2.6.0 — October 2026
+
+### Changed
+- **Pressure circle redesigned.**
+  - **Setup:** pick a 2, 3 or 4 ft circle. Twelve balls are placed evenly around a random hole, and all of them show on the green. Putt them in order.
+  - **Runs:** 12 in a row is a mini celebration, then 12 new balls on the same hole. 24 is a mega celebration, then 12 more. 36 wins the level, with the option to go on to the next circle size.
+  - **Misses:** you start again from ball 1 on a different hole.
+  - **Removed:** lives, the shrinking cup and the 3→8 ft ladder.
+
+
+## 2.5.0 — October 2026
+
+### Added
+- **Strokes gained in Stats** (per putt, per 18 holes, total, and per distance band), with a choice of baseline: **PGA Tour, scratch, 5, 10, 15 or 20 handicap**. The make-rate chart marks the same baseline. The Tour uses Broadie's table. The amateur baselines are built from Shot Scope make rates by handicap and Arccos 3-putt rates (see the README).
+- **Practice: after each putt** stay on the same putt, move to a new green after a make, or play a random putt every time.
+- **Drill result card:** during drills, the putt's verdict (read · start line · pace, speed and % firm/soft) shows on the green for about 7 s. Click to dismiss.
+
+### Changed
+- **Results wait for the ball to stop.** The Last putt panel, grades, lag markers and drill scores update when the roll ends, not at impact.
+- **Rolling off the green ends it.** The roll is cut short just after the ball leaves the green. In the Scramble the hole ends (+1 stroke); in the other drills it's a miss. You're never asked to putt from off the green.
+- **Cameras:** Follow is the default (everyone is moved to it once) and sits 20% further back. "Behind ball" is renamed **Putter view**, sits 20% further back, and flies behind the ball where it stopped (the putt is held a little longer, 3.2 s, so you can see it).
+- Read diagnosis: a good read just says "Holes at perfect pace", and the explanation says "the ideal line was…".
+
+### Fixed
+- The result banner and new card are centred (the pop-in animation was shifting them left).
+- The miss scatter in Stats no longer draws outside its frame after a very long miss.
+
+
 ## 2.4.3 — October 2026
 
 ### Changed

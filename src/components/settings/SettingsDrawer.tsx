@@ -107,6 +107,25 @@ export function SettingsDrawer({
 
             {practice && (
               <>
+                <Field label="After each putt">
+                  <Segmented
+                    value={s.practiceNext}
+                    onChange={(v) => onChange({ practiceNext: v })}
+                    options={[
+                      { value: 'same', label: 'Same putt' },
+                      { value: 'new-on-make', label: 'New after a make' },
+                      { value: 'random', label: 'Random' },
+                    ]}
+                    size="sm"
+                  />
+                  <p className="text-xs text-fog">
+                    {s.practiceNext === 'same'
+                      ? 'Keep practising the same putt until you change it.'
+                      : s.practiceNext === 'new-on-make'
+                      ? 'Stay on this putt until you hole it, then move to a new green or pin.'
+                      : 'Every putt is a new green, pin, slope (mild to hard) and length (3–35 ft). Distance and slope below are ignored.'}
+                  </p>
+                </Field>
                 <Field label="Distance" value={`${s.practiceDistanceFt} ft`}>
                   <input
                     type="range"
@@ -198,8 +217,8 @@ export function SettingsDrawer({
               value={s.camera}
               onChange={(v) => onChange({ camera: v })}
               options={[
-                { value: 'behind', label: 'Behind ball' },
                 { value: 'follow', label: 'Follow' },
+                { value: 'behind', label: 'Putter view' },
                 { value: 'overhead', label: 'Overhead' },
                 { value: 'orbit', label: 'Free' },
               ]}

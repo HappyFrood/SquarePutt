@@ -23,6 +23,10 @@ interface Props {
   exaggeration: number;
   /** Chosen start line, degrees off the line to the hole (+ right). */
   aimDeg: number;
+  /** Other balls waiting their turn (Pressure circle) or left on the green (Leapfrog). */
+  waitingBalls?: Vec2[];
+  /** Leapfrog ladder. */
+  ladder?: { fromFt: number; toFt: number; stepFt: number } | null;
   onRollComplete: () => void;
 }
 
@@ -40,6 +44,8 @@ export function PuttingGreenCanvas({
   resetKey,
   exaggeration,
   aimDeg,
+  waitingBalls,
+  ladder,
   onRollComplete,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -95,6 +101,14 @@ export function PuttingGreenCanvas({
   useEffect(() => {
     sceneRef.current?.setAim(aimDeg);
   }, [aimDeg]);
+
+  useEffect(() => {
+    sceneRef.current?.setWaitingBalls(waitingBalls ?? []);
+  }, [waitingBalls, surface]);
+
+  useEffect(() => {
+    sceneRef.current?.setLadder(ladder ?? null);
+  }, [ladder, surface, ball.x, ball.z]);
 
   useEffect(() => {
     sceneRef.current?.setCameraMode(cameraMode);

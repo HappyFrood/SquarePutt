@@ -135,6 +135,10 @@ export interface PuttingShotData {
   leaveFt: number;
   isHoled: boolean;
   lipOut: boolean;
+  /** Finished off the putting surface. */
+  offGreen?: boolean;
+  /** Putt with no cup (Leapfrog ladder): left out of make %, strokes gained and reading stats. */
+  noHole?: boolean;
   timeToZeroSkidMs: number;
   skidDistanceInches: number;
   trueRollDistanceFt: number;

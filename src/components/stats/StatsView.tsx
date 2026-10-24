@@ -5,6 +5,7 @@ import { PuttingShotData } from '@/lib/types';
 import { calculateBagMapping, clearShotHistory, exportSessionData, getDrillBests, importSessionData } from '@/lib/storage';
 import { calculateMean, calculateStdDev } from '@/lib/calculations';
 import { readStats } from '@/lib/diagnosis';
+import { Baseline, BASELINES, makePct, strokesGained } from '@/lib/baselines';
 import { Button, Panel, Segmented, signed } from '@/components/ui/controls';
 
 type Filter = 'all' | 'short' | 'mid' | 'lag';
@@ -15,18 +16,33 @@ const FILTERS: Record<Filter, (s: PuttingShotData) => boolean> = {
   lag: (s) => s.targetDistanceFt >= 20,
 };
 
-export function StatsView({ shots, onDataChanged }: { shots: PuttingShotData[]; onDataChanged: () => void }) {
+export function StatsView({ shots, onDataChanged, baseline, onBaseline }: { shots: PuttingShotData[]; onDataChanged: () => void; baseline: Baseline; onBaseline: (b: Baseline) => void }) {
   const [filter, setFilter] = useState<Filter>('all');
   const [msg, setMsg] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const filtered = useMemo(() => shots.filter(FILTERS[filter]), [shots, filter]);
+  // Leapfrog putts have no cup: leave them out of make rates, strokes gained and reading.
+  const holeShots = useMemo(() => shots.filter((s) => !s.noHole), [shots]);
+  const filtered = useMemo(() => holeShots.filter(FILTERS[filter]), [holeShots, filter]);
   const bests = getDrillBests();
-  const buckets = calculateBagMapping(shots);
+  const buckets = calculateBagMapping(holeShots);
 
   const made = filtered.filter((s) => s.isHoled).length;
   const speedErr = filtered.filter((s) => s.speedErrorPct !== undefined).map((s) => s.speedErrorPct!);
   const lineErr = filtered.filter((s) => s.startLineErrorDeg !== undefined).map((s) => s.startLineErrorDeg!);
   const rs = readStats(filtered);
+  const bl = BASELINES.find((b) => b.id === baseline) ?? BASELINES[0];
+  // Strokes gained per putt: expected putts from the start − 1 − expected putts from where it finished.
+  const sgOf = (s: PuttingShotData) => strokesGained(baseline, s.targetDistanceFt, s.isHoled, s.leaveFt);
+  const sgs = filtered.map(sgOf);
+  const sgPerPutt = sgs.length ? calculateMean(sgs) : null;
+  const sgTotal = sgs.reduce((a, b) => a + b, 0);
+  // Baseline make rate for each distance bucket, at the distances actually putted
+  const bucketBase = buckets.map((b) => {
+    const inB = holeShots.filter((s) => s.targetDistanceFt >= b.minDistFt && s.targetDistanceFt <= b.maxDistFt);
+    const base = inB.length ? calculateMean(inB.map((s) => makePct(baseline, s.targetDistanceFt))) : makePct(baseline, (b.minDistFt + b.maxDistFt) / 2);
+    const sg = inB.length ? calculateMean(inB.map(sgOf)) : null;
+    return { base, sg };
+  });
 
   const exportData = () => {
     const blob = new Blob([exportSessionData()], { type: 'application/json' });
@@ -45,7 +61,13 @@ export function StatsView({ shots, onDataChanged }: { shots: PuttingShotData[]; 
             <h1 className="text-3xl font-bold">Your putting</h1>
             <p className="text-mist">{shots.length ? `${shots.length} putts recorded on this device.` : 'No putts yet — hit some in Practice or a drill.'}</p>
           </div>
-          <div className="w-[420px] max-w-full">
+          <div className="w-[420px] max-w-full space-y-2">
+            <Segmented
+              value={baseline}
+              onChange={onBaseline}
+              options={BASELINES.map((b) => ({ value: b.id, label: b.label }))}
+              size="sm"
+            />
             <Segmented
               value={filter}
               onChange={setFilter}
@@ -58,6 +80,16 @@ export function StatsView({ shots, onDataChanged }: { shots: PuttingShotData[]; 
               size="sm"
             />
           </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
+          <Tile
+            value={sgPerPutt !== null ? signed(sgPerPutt, 2) : '–'}
+            label={`strokes gained per putt vs ${bl.long}`}
+            tone={sgPerPutt === null ? undefined : sgPerPutt >= 0 ? 'text-birdie' : 'text-bogey'}
+          />
+          <Tile value={sgPerPutt !== null ? signed(sgPerPutt * 18, 1) : '–'} label="per 18 holes, if every hole started with putts like these" tone={sgPerPutt === null ? undefined : sgPerPutt >= 0 ? 'text-birdie' : 'text-bogey'} />
+          <Tile value={sgs.length ? signed(sgTotal, 1) : '–'} label={`total over ${sgs.length} putts`} />
         </div>
 
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
@@ -76,17 +108,17 @@ export function StatsView({ shots, onDataChanged }: { shots: PuttingShotData[]; 
 
           <Panel className="p-5">
             <h2 className="text-lg font-bold">Make rate by distance</h2>
-            <p className="text-sm text-mist">Your one-putt rate, with the PGA Tour average marked.</p>
+            <p className="text-sm text-mist">Your one-putt rate, with {bl.long}&apos;s marked, and strokes gained per putt.</p>
             <div className="mt-4 space-y-3">
-              {buckets.map((b) => (
-                <div key={b.distanceLabel} className="grid grid-cols-[52px_1fr_88px] items-center gap-3">
+              {buckets.map((b, bi) => (
+                <div key={b.distanceLabel} className="grid grid-cols-[52px_1fr_88px_56px] items-center gap-3">
                   <span className="num text-lg font-semibold">{b.distanceLabel}</span>
                   <div className="relative h-3 rounded-full bg-club-800">
                     <div
-                      className={`h-3 rounded-full ${b.makeRatePct >= b.tourMakeRatePct ? 'bg-birdie' : 'bg-par'}`}
+                      className={`h-3 rounded-full ${b.makeRatePct >= bucketBase[bi].base ? 'bg-birdie' : 'bg-par'}`}
                       style={{ width: `${b.attempts ? Math.max(2, b.makeRatePct) : 0}%` }}
                     />
-                    <div className="absolute -top-1 h-5 w-0.5 bg-chalk" style={{ left: `${b.tourMakeRatePct}%` }} title={`Tour ${b.tourMakeRatePct}%`} />
+                    <div className="absolute -top-1 h-5 w-0.5 bg-chalk" style={{ left: `${bucketBase[bi].base}%` }} title={`${bl.label} ${Math.round(bucketBase[bi].base)}%`} />
                   </div>
                   <span className="text-right text-sm text-mist">
                     {b.attempts ? (
@@ -97,11 +129,15 @@ export function StatsView({ shots, onDataChanged }: { shots: PuttingShotData[]; 
                       'no putts'
                     )}
                   </span>
+                  <span className={`num text-right text-sm ${bucketBase[bi].sg === null ? 'text-fog' : bucketBase[bi].sg! >= 0 ? 'text-birdie' : 'text-bogey'}`} title="Strokes gained per putt">
+                    {bucketBase[bi].sg === null ? '' : signed(bucketBase[bi].sg!, 2)}
+                  </span>
                 </div>
               ))}
             </div>
             <p className="mt-4 flex items-center gap-2 text-xs text-fog">
-              <span className="inline-block h-3 w-0.5 bg-chalk" /> PGA Tour average
+              <span className="inline-block h-3 w-0.5 bg-chalk" /> {bl.label} average · right-hand column: strokes gained per putt
+              {baseline !== 'tour' && <span className="ml-1">· amateur baselines from Shot Scope make rates and Arccos 3-putt rates</span>}
             </p>
           </Panel>
         </div>
@@ -163,7 +199,7 @@ export function StatsView({ shots, onDataChanged }: { shots: PuttingShotData[]; 
             <h2 className="text-lg font-bold">Personal bests</h2>
             <div className="mt-4 grid grid-cols-3 gap-4">
               <Tile value={bests.pressureCircle.bestStreak || '–'} label="Pressure circle: longest streak" />
-              <Tile value={bests.speedControl.highScore || '–'} label="Speed control: high score" />
+              <Tile value={bests.leapfrog.best || '–'} label="Leapfrog: most balls" />
               <Tile value={bests.scrambleGauntlet.highestStrokesGained > -900 ? signed(bests.scrambleGauntlet.highestStrokesGained, 1) : '–'} label="Scramble: strokes gained per 18" />
             </div>
           </Panel>
@@ -208,10 +244,10 @@ export function StatsView({ shots, onDataChanged }: { shots: PuttingShotData[]; 
   );
 }
 
-function Tile({ value, label }: { value: React.ReactNode; label: string }) {
+function Tile({ value, label, tone }: { value: React.ReactNode; label: string; tone?: string }) {
   return (
     <div className="rounded-2xl bg-club-900 p-4 ring-1 ring-line">
-      <div className="num text-4xl font-semibold">{value}</div>
+      <div className={`num text-4xl font-semibold ${tone ?? ''}`}>{value}</div>
       <div className="mt-1 text-sm text-mist">{label}</div>
     </div>
   );
@@ -228,7 +264,7 @@ function Dispersion({ shots }: { shots: PuttingShotData[] }) {
   const k = S / R;
   const clampv = (v: number) => Math.max(-R, Math.min(R, v));
   return (
-    <svg viewBox={`${-S - 10} ${-S - 10} ${2 * S + 20} ${2 * S + 20}`} className="mx-auto mt-4 w-full max-w-[440px]" role="img" aria-label="Scatter of where missed putts finished around the hole">
+    <svg viewBox={`${-S - 10} ${-S - 10} ${2 * S + 20} ${2 * S + 20}`} className="mx-auto mt-4 w-full max-w-[440px] overflow-hidden" role="img" aria-label="Scatter of where missed putts finished around the hole">
       {[1, 2, 3, 4, 5, 6].map((r) => (
         <circle key={r} r={r * k} fill={r === 3 ? 'rgba(74,222,128,0.06)' : 'none'} stroke={r === 3 ? '#4ade80' : '#2a4a3b'} strokeWidth={r === 3 ? 1.5 : 1} />
       ))}

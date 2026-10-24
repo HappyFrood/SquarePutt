@@ -1,24 +1,24 @@
 'use client';
 
 import React from 'react';
-import { Heart, RotateCcw } from 'lucide-react';
+import { RotateCcw } from 'lucide-react';
 import {
   PressureConfig,
   PressureState,
   pressureFaceStdDev,
-  cupMultiplierForStreak,
-  LagConfig,
-  LagState,
-  lagStats,
-  lagRating,
-  LagZone,
+  CIRCLE_BALLS,
+  CIRCLE_GOAL,
+  LeapConfig,
+  LeapState,
+  LEAP_START_FT,
+  LEAP_END_FT,
   ScrambleConfig,
   ScrambleState,
   scrambleStats,
   gimmeRadiusFt,
   scrambleCurrentDistanceFt,
 } from '@/lib/drills';
-import { gradeFaceAngleVariance, gradeDistanceDispersion, gradeStrokesGainedPer18 } from '@/lib/calculations';
+import { gradeFaceAngleVariance, gradeStrokesGainedPer18 } from '@/lib/calculations';
 import { Button, Field, Grade, Panel, Segmented, signed } from '@/components/ui/controls';
 import { SLOPE_OPTIONS } from '@/components/settings/SettingsDrawer';
 import { SlopeDifficulty } from '@/lib/types';
@@ -65,6 +65,7 @@ export function PressurePanel({
   onConfig,
   onStart,
   onReset,
+  onNextLevel,
   best,
 }: {
   state: PressureState | null;
@@ -72,36 +73,33 @@ export function PressurePanel({
   onConfig: (c: PressureConfig) => void;
   onStart: () => void;
   onReset: () => void;
+  onNextLevel: () => void;
   best: number;
 }) {
   if (!state) {
     return (
       <Panel>
-        <Header title="Pressure circle" sub="Short putts, survival style" />
+        <Header title="Pressure circle" sub="12 balls around the hole" />
         <div className="space-y-5 px-5 py-5">
           <p className="text-sm leading-relaxed text-mist">
-            Every putt comes from a new spot around the hole, so each one breaks differently. Makes in a row shrink the cup. Run out of lives and the game ends.
+            Twelve balls ring a random hole, each from a different side, so every putt breaks differently. Hole them in order. Twelve in a row earns a fresh set on the same hole; <strong className="text-chalk">36 in a row wins the level</strong>. Miss once and you start again from ball 1 on a new hole.
           </p>
-          <Field label="Distance">
+          <Field label="Circle">
             <Segmented
-              value={config.distance}
-              onChange={(v) => onConfig({ ...config, distance: v })}
+              value={config.radius}
+              onChange={(v) => onConfig({ ...config, radius: v })}
               options={[
+                { value: 2, label: '2 ft' },
                 { value: 3, label: '3 ft' },
-                { value: 5, label: '5 ft' },
-                { value: 8, label: '8 ft' },
-                { value: 'ladder', label: '3→8 ladder' },
+                { value: 4, label: '4 ft' },
               ]}
             />
-          </Field>
-          <Field label="Lives">
-            <Segmented value={config.lives} onChange={(v) => onConfig({ ...config, lives: v })} options={[{ value: 1, label: 'One miss' }, { value: 3, label: '3' }, { value: 5, label: '5' }]} />
           </Field>
           <Field label="Slope">
             <Segmented value={config.difficulty} onChange={(v: SlopeDifficulty) => onConfig({ ...config, difficulty: v })} options={SLOPE_OPTIONS} size="sm" />
           </Field>
           <Button onClick={onStart} className="w-full py-3 text-base">Start</Button>
-          {best > 0 && <p className="text-center text-sm text-fog">Best streak: {best}</p>}
+          {best > 0 && <p className="text-center text-sm text-fog">Best run: {best}</p>}
         </div>
       </Panel>
     );
@@ -109,22 +107,35 @@ export function PressurePanel({
 
   const sd = pressureFaceStdDev(state);
   const pct = state.attempts ? Math.round((state.makes / state.attempts) * 100) : 0;
+  const set = Math.min(2, Math.floor(state.run / CIRCLE_BALLS)); // 0,1,2
+  const won = state.status === 'won';
   return (
     <Panel>
-      <Header title="Pressure circle" sub={`${state.distanceFt} ft · ${state.cfg.difficulty} slope`} onRestart={onReset} />
+      <Header title="Pressure circle" sub={`${state.cfg.radius} ft circle · ${state.cfg.difficulty} slope`} onRestart={onReset} />
       <div className="space-y-5 px-5 py-5">
         <div className="flex items-end justify-between">
-          <Big value={state.streak} label="in a row" tone={state.streak >= 5 ? 'text-flag' : 'text-chalk'} />
-          <div className="flex gap-1 pb-2" aria-label={`${state.lives} lives left`}>
-            {Array.from({ length: state.cfg.lives }, (_, i) => (
-              <Heart key={i} size={22} className={i < state.lives ? 'fill-bogey text-bogey' : 'text-club-700'} />
-            ))}
+          <Big value={state.run} label={`in a row · goal ${CIRCLE_GOAL}`} tone={state.run >= 24 ? 'text-flag' : state.run >= 12 ? 'text-birdie' : 'text-chalk'} />
+          <div className="pb-1 text-right">
+            <div className="num text-lg font-semibold">{won ? 'Done' : `Set ${set + 1} of 3`}</div>
+            <div className="text-xs text-fog">hole {state.holes}</div>
           </div>
         </div>
+        {/* the 12 balls of the current set */}
+        <div className="grid grid-cols-12 gap-1" aria-label="Balls in this set">
+          {Array.from({ length: CIRCLE_BALLS }, (_, i) => {
+            const done = won || i < state.ballIdx;
+            const current = !won && i === state.ballIdx;
+            return <span key={i} className={`h-3 rounded-full ${done ? 'bg-birdie' : current ? 'bg-chalk ring-2 ring-flag' : 'bg-club-700'}`} />;
+          })}
+        </div>
+        {/* progress to 36 */}
+        <div className="h-2 overflow-hidden rounded-full bg-club-800">
+          <div className="h-2 rounded-full bg-flag transition-all" style={{ width: `${(state.run / CIRCLE_GOAL) * 100}%` }} />
+        </div>
         <div className="grid grid-cols-3 gap-3">
-          <Stat value={`${(4.25 * cupMultiplierForStreak(state.streak)).toFixed(2)}″`} label="cup size" />
+          <Stat value={Math.max(best, state.bestRun)} label="best run" />
           <Stat value={`${pct}%`} label={`made (${state.makes}/${state.attempts})`} />
-          <Stat value={Math.max(best, state.bestStreak)} label="best streak" />
+          <Stat value={state.holes} label="holes played" />
         </div>
         <History items={state.history} />
         {state.faceAngles.length >= 3 && (
@@ -133,15 +144,15 @@ export function PressurePanel({
             <Grade grade={gradeFaceAngleVariance(sd)} />
           </div>
         )}
-        {state.status === 'over' && (
-          <div className="space-y-2 rounded-xl bg-club-950/70 p-4 ring-1 ring-line">
-            <p className="font-semibold">Game over</p>
+        {won && (
+          <div className="space-y-2 rounded-xl bg-flag/15 p-4 ring-1 ring-flag">
+            <p className="font-semibold text-flag">{state.cfg.radius} ft level complete!</p>
             <p className="text-sm text-mist">
-              {state.makes} of {state.attempts} made, best run {state.bestStreak}. {state.bestStreak >= best && state.bestStreak > 0 ? 'New personal best.' : ''}
+              36 in a row after {state.holes} {state.holes === 1 ? 'hole' : 'holes'} ({state.makes} of {state.attempts} made).
             </p>
             <div className="flex gap-2 pt-1">
-              <Button onClick={onStart} className="flex-1">Play again</Button>
-              <Button variant="quiet" onClick={onReset} className="flex-1">Change setup</Button>
+              {state.cfg.radius < 4 && <Button onClick={onNextLevel} className="flex-1">Next level: {state.cfg.radius + 1} ft</Button>}
+              <Button variant="quiet" onClick={onStart} className="flex-1">Play {state.cfg.radius} ft again</Button>
             </div>
           </div>
         )}
@@ -164,16 +175,7 @@ function History({ items }: { items: boolean[] }) {
 
 /* ----------------------------------- Lag putts ----------------------------------- */
 
-const ZONE_CLS: Record<LagZone, string> = {
-  holed: 'bg-eagle text-club-950',
-  zone: 'bg-birdie text-club-950',
-  'close-short': 'bg-par text-club-950',
-  long: 'bg-club-700 text-chalk',
-  short: 'bg-bogey text-club-950',
-  'way-long': 'bg-bogey text-club-950',
-};
-
-export function LagPanel({
+export function LeapfrogPanel({
   state,
   config,
   onConfig,
@@ -181,9 +183,9 @@ export function LagPanel({
   onReset,
   best,
 }: {
-  state: LagState | null;
-  config: LagConfig;
-  onConfig: (c: LagConfig) => void;
+  state: LeapState | null;
+  config: LeapConfig;
+  onConfig: (c: LeapConfig) => void;
   onStart: () => void;
   onReset: () => void;
   best: number;
@@ -191,84 +193,66 @@ export function LagPanel({
   if (!state) {
     return (
       <Panel>
-        <Header title="Speed control" sub="Lag putts into the 3 ft zone" />
+        <Header title="Leapfrog" sub="Pace control ladder" />
         <div className="space-y-5 px-5 py-5">
-          <ul className="space-y-1 text-sm text-mist">
-            <li><span className="font-semibold text-chalk">+5</span> holed · <span className="font-semibold text-chalk">+3</span> past the hole, within 3 ft</li>
-            <li><span className="font-semibold text-chalk">+1</span> within 3 ft but short · <span className="font-semibold text-chalk">−1</span> short, or over 6 ft long</li>
-            <li>Three good ones in a row start a <span className="font-semibold text-chalk">+1</span> combo.</li>
-          </ul>
-          <Field label="Distance">
-            <Segmented
-              value={config.distance}
-              onChange={(v) => onConfig({ ...config, distance: v })}
-              options={[{ value: 20, label: '20 ft' }, { value: 30, label: '30 ft' }, { value: 50, label: '50 ft' }, { value: 'mixed', label: 'Mixed' }]}
-            />
-            <p className="text-xs text-fog">Mixed (20–50 ft) is the best practice — changing length every putt builds feel that holds up on the course.</p>
-          </Field>
-          <Field label="Putts per set">
-            <Segmented value={config.putts} onChange={(v) => onConfig({ ...config, putts: v })} options={[{ value: 10, label: '10' }, { value: 15, label: '15' }]} />
-          </Field>
+          <p className="text-sm leading-relaxed text-mist">
+            Every putt goes from the same spot along a {LEAP_END_FT} ft ladder (no hole). Roll the first ball just past the {LEAP_START_FT} ft rung, then each next ball just past the one before, as close to it as you can. Come up short of the last ball, or roll past the {LEAP_END_FT} ft line, and the round is over: your score is how many balls you fitted in.
+          </p>
           <Field label="Slope">
             <Segmented value={config.difficulty} onChange={(v: SlopeDifficulty) => onConfig({ ...config, difficulty: v })} options={SLOPE_OPTIONS} size="sm" />
           </Field>
-          <Button onClick={onStart} className="w-full py-3 text-base">Start set</Button>
-          {best > 0 && <p className="text-center text-sm text-fog">High score: {best}</p>}
+          <Button onClick={onStart} className="w-full py-3 text-base">Start</Button>
+          {best > 0 && <p className="text-center text-sm text-fog">Best: {best} balls</p>}
         </div>
       </Panel>
     );
   }
 
-  const st = lagStats(state);
-  const cur = state.distances[Math.min(state.idx, state.distances.length - 1)];
+  const n = state.balls.length;
+  const last = n ? state.balls[n - 1].ft : LEAP_START_FT;
+  const span = LEAP_END_FT - LEAP_START_FT;
+  const pos = (ft: number) => `${((Math.min(LEAP_END_FT, Math.max(LEAP_START_FT, ft)) - LEAP_START_FT) / span) * 100}%`;
+  const recentScores = state.scores.slice(-8);
   return (
     <Panel>
-      <Header title="Speed control" sub={state.status === 'over' ? 'Set complete' : `Putt ${state.idx + 1} of ${state.distances.length} · ${cur} ft`} onRestart={onReset} />
+      <Header title="Leapfrog" sub={`${LEAP_START_FT}–${LEAP_END_FT} ft ladder · ${state.cfg.difficulty} slope`} onRestart={onReset} />
       <div className="space-y-5 px-5 py-5">
         <div className="flex items-end justify-between">
-          <Big value={state.score} label="points" />
-          {state.combo >= 2 && <span className="mb-2 rounded-full bg-flag px-3 py-1 text-sm font-bold text-flag-ink">Combo ×{state.combo}</span>}
+          <Big value={n} label={n === 1 ? 'ball this round' : 'balls this round'} tone={n >= Math.max(1, best) ? 'text-flag' : 'text-chalk'} />
+          <div className="pb-1 text-right">
+            <div className="num text-lg font-semibold">{(LEAP_END_FT - last).toFixed(1)} ft</div>
+            <div className="text-xs text-fog">room left</div>
+          </div>
         </div>
-        <div className="grid grid-cols-5 gap-1.5">
-          {state.distances.map((d, i) => {
-            const r = state.results[i];
-            return (
-              <div
-                key={i}
-                className={`num rounded-md py-1 text-center text-sm font-semibold ${r ? ZONE_CLS[r.zone] : i === state.idx ? 'ring-2 ring-flag text-chalk' : 'bg-club-800 text-fog'}`}
-                title={r ? `${d} ft → left ${r.leaveFt.toFixed(1)} ft` : `${d} ft`}
-              >
-                {r ? signed(r.points, 0) : d}
-              </div>
-            );
-          })}
+        {/* the ladder: where each ball finished */}
+        <div>
+          <div className="relative h-8 rounded-lg bg-club-800 ring-1 ring-line">
+            {Array.from({ length: span / 3 + 1 }, (_, i) => (
+              <span key={i} className={`absolute inset-y-1 w-px ${i === 0 ? 'bg-chalk' : i === span / 3 ? 'bg-bogey' : 'bg-club-700'}`} style={{ left: pos(LEAP_START_FT + i * 3) }} />
+            ))}
+            {state.balls.map((b, i) => (
+              <span key={i} className="absolute top-1/2 h-3 w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-chalk ring-2 ring-club-950" style={{ left: pos(b.ft) }} title={`${b.ft.toFixed(1)} ft`} />
+            ))}
+          </div>
+          <div className="mt-1 flex justify-between text-xs text-fog">
+            <span>{LEAP_START_FT} ft</span>
+            <span>{LEAP_END_FT} ft</span>
+          </div>
         </div>
         <div className="grid grid-cols-3 gap-3">
-          <Stat value={`${st.inZone}/${state.results.length}`} label="in the zone" />
-          <Stat value={st.shortCount} label="left short" />
-          <Stat value={Math.max(best, state.score)} label="high score" />
+          <Stat value={Math.max(best, state.best)} label="best" />
+          <Stat value={state.rounds} label="round" />
+          <Stat value={state.scores.length ? (state.scores.reduce((a, b) => a + b, 0) / state.scores.length).toFixed(1) : '–'} label="average score" />
         </div>
-        {state.results.length >= 3 && (
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-mist">Distance spread ±{st.distanceStdDevFt.toFixed(1)} ft</span>
-            <Grade grade={gradeDistanceDispersion(st.distanceStdDevFt)} />
+        {recentScores.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 text-sm text-mist">
+            Last rounds:
+            {recentScores.map((v, i) => (
+              <span key={i} className="num rounded-md bg-club-800 px-2 py-0.5 text-chalk">{v}</span>
+            ))}
           </div>
         )}
-        {state.status === 'over' && (
-          <div className="space-y-2 rounded-xl bg-club-950/70 p-4 ring-1 ring-line">
-            <div className="flex items-center justify-between">
-              <p className="font-semibold">{state.score} points</p>
-              <Grade grade={lagRating(state.score, state.distances.length)} />
-            </div>
-            <p className="text-sm text-mist">
-              {st.inZone} of {state.results.length} in the zone · best combo {state.bestCombo} · {st.threePuttRisk} left over 6 ft
-            </p>
-            <div className="flex gap-2 pt-1">
-              <Button onClick={onStart} className="flex-1">New set</Button>
-              <Button variant="quiet" onClick={onReset} className="flex-1">Change setup</Button>
-            </div>
-          </div>
-        )}
+        <p className="text-xs text-fog">Next ball: just past {n ? `${last.toFixed(1)} ft` : `the ${LEAP_START_FT} ft rung`}.</p>
       </div>
     </Panel>
   );

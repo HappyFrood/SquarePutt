@@ -58,6 +58,12 @@ Any distance (3–50 ft), any slope, new greens on demand.
 *   **Diagnosis (read · start line · pace):** when the player chose the line, the chosen line is simulated at ideal pace. If it holes, the read is good; otherwise it's classed as under-read / over-read (or left / right on a straight putt, i.e. ideal under 0.25°), reported in degrees with the share of the break played (aim ÷ ideal start angle). Start line is good within max(0.5°, the angle that moves the ball 1.5 in at the hole); pace is good if holed, or if the ball reached the hole and finished ≤ max(1.5 ft, 5% of the putt) past. When pace was off, the start line that holes at the actual pace is solved and reported (or that none reaches / even the centre line lips out). A one-line verdict names what cost the putt, and the overall grade includes the read (holes = Eagle, within 3 in = Par, else Bogey).
 *   **Green-reading stats:** read make % at ideal pace, average aim gap, median share of the break played, under- vs over-read rate on breaking putts, and the share of misses where the read, start line or pace was off.
 *   **Display:** green height exaggerated 3× on screen (fixed; not a user setting).
+*   **Result timing:** result, grades, markers and drill scores are revealed when the ball stops, not at impact.
+*   **After each putt (Practice):** same putt / new green after a make / random putt (any green and pin, mild–hard, 3–35 ft).
+*   **Cameras:** Follow (default), Putter view (flies behind the ball where it stopped), Overhead, Free. Follow and Putter view sit 20% further back than in revision 2.
+*   **Off the green:** a putt that leaves the putting surface is cut short. In the Scramble the hole ends (+1); in the other drills it's a miss. Never putt from off the green.
+*   **Drill result card:** during drills, a short card with the read · start line · pace verdict appears on the green for ~7 s.
+*   **Stats baselines:** strokes gained (per putt, per 18, total, by distance) and make-rate marks against PGA Tour, scratch, 5, 10, 15 or 20 handicap. The Tour uses Broadie's table. Amateur tables are built from Shot Scope make % by handicap plus a Tour-shaped 3-putt curve scaled to Arccos 3-putt rates from ~38 ft.
 *   **Virtual putts:** simulated strokes (realistic, perfect, push, pull, firm, soft, custom) for use without a launch monitor.
 
 ### 5.2 Gamified Putting Drills
@@ -68,20 +74,17 @@ All drills use the **Quintic-inspired color-coding system**:
 *   **Red (Bogey):** Poor/High variance
 
 #### A. Short Putts ("The Pressure Circle")
-*   **Goal:** Make-percentage and start-line control under pressure, on putts that break.
-*   **Distances:** 3 ft, 5 ft, 8 ft, or a **3→8 ft ladder** (three makes in a row moves back one foot; a miss moves forward one foot).
-*   **Around the clock:** every putt comes from a different position around the hole, so each putt breaks differently and must be read (slope selectable; Mild by default).
-*   **Gamification:** "Survival Mode" with **1, 3 or 5 lives**. The cup shrinks with each consecutive make (4% per make, minimum 2.55″) and resets on a miss. Milestone celebrations at 5, 10, 15, 25 and 50 in a row. Personal best streak is saved.
+*   **Goal:** hole 36 short putts in a row around one hole, every one breaking differently.
+*   **Setup:** a random hole (green + pin, slope selectable, Mild by default) and a circle of **2, 3 or 4 ft**. **12 balls** are placed evenly around the hole and all shown on the green; they're putted in order around the clock.
+*   **Run:** each make extends the run. **12 in a row:** mini celebration, same hole, 12 new balls. **24:** mega celebration, 12 more. **36:** level won (offer the next circle size). **Any miss:** run resets to 0 and play restarts from ball 1 on a different hole.
+*   **Tracking:** run (of 36), position in the current set of 12, best run (saved), make %, holes played.
 *   **Dispersion Metric:** start-line standard deviation (against the chosen line) across the session, graded Eagle–Bogey.
 
-#### B. Lag Putts ("Speed Control Zone")
-*   **Goal:** Distance control and ball speed consistency.
-*   **Distances:** 20 ft, 30 ft, 50 ft, or **mixed 20–50 ft** (default; varied practice transfers better than repeating one length). Ball positions vary around the hole.
-*   **Gamification:** "Bullseye" sets of 10 or 15 putts. The 3 ft zone is drawn on the green and every finish in the set stays marked.
-    *   Holed +5; past the hole within 3 ft +3; within 3 ft but short +1; 3–6 ft long 0; short (outside 3 ft) or more than 6 ft long −1.
-    *   Combo: the third consecutive zone finish, and each one after, earns +1.
-    *   High score is saved; each set is graded.
-*   **Dispersion Metric:** Front-to-back distance standard deviation (ft), graded.
+#### B. Lag Putts ("Leapfrog")
+*   **Goal:** pace control, meaning feel for incremental changes in distance.
+*   **Setup:** a 30 ft ladder from a fixed spot on a random green (rungs every 3 ft, red boundary at 30 ft). There's no cup: the pin is hidden and cupless.
+*   **Rules:** ball 1 must finish past the 3 ft rung; every next ball just past the previous one (as close as possible). Short of the previous ball, past 30 ft or off the green ends the round; the next round is on a different green and line. **Score = number of balls fitted.** Balls stay on the green where they finished.
+*   **Tracking:** balls this round, room left, ladder strip of finishes, best (saved), rounds, average and recent scores. Celebrations on beating your best (from 4) and every 10 balls. Leapfrog putts are excluded from make %, strokes gained and reading stats.
 
 #### C. Random Putts ("The Scramble")
 *   **Goal:** Adaptability, green reading and feel.

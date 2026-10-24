@@ -64,7 +64,7 @@ export function diagnose(s: PuttingShotData): Diagnosis {
   const read: DiagPart = !r || !rd
     ? { state: 'na', text: 'Ideal line (Read + line)' }
     : r.verdict === 'good'
-    ? { state: 'good', text: `Holes at perfect pace${played}` }
+    ? { state: 'good', text: 'Holes at perfect pace' }
     : r.verdict === 'over'
     ? { state: 'off', text: `Over-read ${fmtDeg(rd.errorDeg)}${played}` }
     : r.verdict === 'under'

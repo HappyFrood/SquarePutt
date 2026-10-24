@@ -186,6 +186,12 @@ class OpenConnectService {
       backspinRpm: s.backspinRpm,
     });
 
+    // Did the ball leave the putting surface? (first sample off the green)
+    let offIdx = -1;
+    if (!sim.isHoled && ctx.setup.onGreen) {
+      const on = ctx.setup.onGreen;
+      offIdx = sim.samples.findIndex((p) => !on(p[0], p[2]));
+    }
     const effSpeed = s.ballSpeedMph * (ctx.setup.speedCalibration ?? 1);
     const speedErrorPct = ctx.ideal ? ((effSpeed - ctx.ideal.ballSpeedMph) / ctx.ideal.ballSpeedMph) * 100 : undefined;
     const aim = ctx.aimHlaDeg ?? ctx.ideal?.hlaDeg;
@@ -193,7 +199,7 @@ class OpenConnectService {
 
     // Green reading: would the chosen line have holed at ideal pace? (the read on its own, stroke removed)
     let read: ReadCheck | undefined;
-    if (ctx.ideal && aim !== undefined && ctx.aimSource === 'player') {
+    if (ctx.ideal && aim !== undefined && ctx.aimSource === 'player' && (ctx.setup.holeRadiusMultiplier ?? 1) > 0) {
       const distIn = Math.hypot(ctx.setup.ball.x, ctx.setup.ball.z) * 39.3701;
       const aimIn = Math.tan((aim * Math.PI) / 180) * distIn;
       const idealIn = ctx.ideal.aimOffsetIn;
@@ -281,6 +287,8 @@ class OpenConnectService {
       leaveFt: Number(sim.leaveFt.toFixed(2)),
       isHoled: sim.isHoled,
       lipOut: sim.lipOut,
+      offGreen: offIdx >= 0,
+      noHole: (ctx.setup.holeRadiusMultiplier ?? 1) === 0 || undefined,
       timeToZeroSkidMs: sim.skidTimeMs,
       skidDistanceInches: Number(sim.skidDistanceIn.toFixed(1)),
       trueRollDistanceFt: Number(Math.max(0, rollFt - skidFt).toFixed(2)),
@@ -298,7 +306,8 @@ class OpenConnectService {
         launchGrade: loft.grade,
         overallGrade: overall,
       },
-      trajectoryPoints: sim.samples,
+      // Left the green: show the ball rolling off, then end the putt (no long roll down a bank).
+      trajectoryPoints: offIdx >= 0 ? sim.samples.slice(0, Math.min(sim.samples.length, offIdx + Math.round(0.6 / sim.sampleDt))) : sim.samples,
       trajectoryDt: sim.sampleDt,
     };
     this.shotListeners.forEach((l) => l(shot));

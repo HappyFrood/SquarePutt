@@ -32,6 +32,27 @@ export const DIFFICULTY_MAX_SLOPE_DEG: Record<SlopeDifficulty, [number, number]>
 /** Radius around the hole (m) inside which slopes are normalized. Covers ~50 ft putts. */
 export const PLAY_RADIUS_M = 16;
 
+/**
+ * Putting surface of a generated green, matching what the scene draws: a round green of
+ * radiusM around the hole, or an ellipse around ball + hole. (The drawn edge has a slight
+ * wobble; this uses the smooth ellipse with 3% grace.)
+ */
+export function generatedGreenContains(p: Vec2, anchor: Vec2, radiusM?: number): boolean {
+  const d = Math.hypot(anchor.x, anchor.z);
+  const round = radiusM !== undefined;
+  const cx = round ? 0 : anchor.x * 0.42;
+  const cz = round ? 0 : anchor.z * 0.42;
+  const ux = d > 0.01 ? -anchor.x / d : 0;
+  const uz = d > 0.01 ? -anchor.z / d : 1;
+  const rx = round ? radiusM! : Math.max(7.5, d * 0.58 + 5.5);
+  const ry = round ? radiusM! * 0.92 : Math.max(6.5, 5 + d * 0.15);
+  const dx = p.x - cx;
+  const dz = p.z - cz;
+  const a = (dx * ux + dz * uz) / rx;
+  const b = (dx * -uz + dz * ux) / ry;
+  return a * a + b * b <= 1.03 * 1.03;
+}
+
 /** Recommended maximum slope at hole locations by green speed (percent grade). */
 export function maxHoleSlopePct(stimp: number): number {
   // ~3.5% at stimp 9, 3% at 10, 2.5% at 11, 2% at 12 (common superintendent guidance)

@@ -69,6 +69,8 @@ const EVENT_STYLE: Record<string, string> = {
   make: 'bg-birdie text-club-950',
   milestone: 'bg-flag text-flag-ink',
   'level-up': 'bg-flag text-flag-ink',
+  mega: 'bg-flag text-flag-ink',
+  win: 'bg-flag text-flag-ink',
   zone: 'bg-birdie text-club-950',
   gimme: 'bg-eagle text-club-950',
   'hole-done': 'bg-chalk text-club-950',
@@ -80,7 +82,7 @@ export function ResultBanner({ event }: { event: DrillEvent | null }) {
   if (!event) return null;
   const cls = EVENT_STYLE[event.kind] ?? 'bg-club-800 text-chalk ring-1 ring-line';
   return (
-    <div className={`sp-pop pointer-events-none absolute bottom-8 left-1/2 z-20 min-w-[280px] -translate-x-1/2 rounded-2xl px-7 py-4 text-center shadow-2xl ${cls}`} role="status">
+    <div className={`sp-pop pointer-events-none absolute bottom-8 left-1/2 z-20 min-w-[280px] rounded-2xl px-7 py-4 text-center shadow-2xl ${cls}`} role="status">
       <div className="num text-4xl font-bold leading-tight">{event.title}</div>
       {event.detail && <div className="mt-1 text-base font-medium opacity-80">{event.detail}</div>}
     </div>

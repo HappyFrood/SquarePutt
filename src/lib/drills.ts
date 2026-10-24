@@ -2,14 +2,13 @@
  * Drill engine: pure state machines for the three practice games.
  *
  * Design notes (why these drills):
- *  - Short putts — "Pressure Circle". The classic circle / around-the-clock drill: every putt
- *    comes from a different clock position on a sloped green, so each one breaks differently
- *    and you must re-read and re-aim (no autopilot). Survival scoring with lives, a cup that
- *    shrinks as the streak grows, and an optional 3→8 ft ladder keep it tense.
- *  - Lag putts — "Speed Control". Ten-putt sets scored on where the ball finishes: the 3 ft
- *    zone around the hole, never short. Mixed distances are the default because randomized
- *    practice transfers better to the course than repeating one length (contextual
- *    interference). Consecutive zone finishes build a combo bonus.
+ *  - Short putts — "Pressure Circle". The classic circle drill: 12 balls around a random hole
+ *    at 2, 3 or 4 ft, each from a different clock position so each breaks differently. Make
+ *    36 in a row (three sets of 12, same hole) to win the level; any miss restarts the run
+ *    on a new hole.
+ *  - Lag putts — "Leapfrog". The proven pace-control ladder: from one spot, each ball must
+ *    finish just past the previous one between the 3 ft rung and the 30 ft line. Trains feel for
+ *    small, incremental changes in distance; the score is how many balls fit.
  *  - Random putts — "The Scramble". A 9/18-hole putting round: every hole is a new green,
  *    distance (6–40 ft) and break. You putt out from wherever the ball stops (inside the
  *    gimme circle is given), and strokes gained is measured against the PGA Tour baseline.
@@ -19,7 +18,7 @@ import { PuttLayout, PuttingShotData, SlopeDifficulty } from './types';
 import { mulberry32 } from './green';
 import { calculateStdDev, getPgaExpectedPutts, calculateCepInches } from './calculations';
 
-export type DrillEventKind = 'make' | 'miss' | 'lip' | 'level-up' | 'milestone' | 'zone' | 'short' | 'long' | 'gimme' | 'hole-done' | 'game-over';
+export type DrillEventKind = 'make' | 'miss' | 'lip' | 'level-up' | 'milestone' | 'mega' | 'win' | 'zone' | 'short' | 'long' | 'gimme' | 'hole-done' | 'game-over';
 
 export interface DrillEvent {
   kind: DrillEventKind;
@@ -35,222 +34,201 @@ const ballFromLayout = (distanceFt: number, angleRad: number) => {
 export { ballFromLayout };
 
 /* ================================ Pressure Circle ================================ */
+/*
+ * 12 balls evenly spaced on a circle (2, 3 or 4 ft) around a random hole, putted in order around
+ * the clock. Every make counts toward a run; a miss sends you back to ball 1 on a different hole.
+ * 12 in a row: mini celebration, same hole, 12 new balls. 24: mega celebration, 12 more.
+ * 36 in a row wins the level.
+ */
+
+export type CircleRadiusFt = 2 | 3 | 4;
 
 export interface PressureConfig {
-  distance: 3 | 5 | 8 | 'ladder';
-  lives: 1 | 3 | 5;
+  radius: CircleRadiusFt;
   difficulty: SlopeDifficulty;
 }
 
+export const CIRCLE_BALLS = 12;
+export const CIRCLE_GOAL = 36;
+
 export interface PressureState {
   cfg: PressureConfig;
+  /** Current hole (green + pin). */
   seed: number;
-  distanceFt: number;
-  clock: number; // 0..11
-  streak: number;
-  bestStreak: number;
-  lives: number;
+  /** Clock position of ball 1 on this hole (radians). */
+  startAngle: number;
+  /** Ball being putted in the current set of 12 (0–11). */
+  ballIdx: number;
+  /** Consecutive makes in this run (0–36). */
+  run: number;
+  bestRun: number;
   makes: number;
   attempts: number;
-  ladderRun: number;
+  holes: number;
   faceAngles: number[];
   history: boolean[];
-  status: 'playing' | 'over';
+  status: 'playing' | 'won';
 }
 
-export const PRESSURE_MILESTONES = [5, 10, 15, 25, 50];
+const randomAngle = () => Math.random() * Math.PI * 2;
 
 export function newPressure(cfg: PressureConfig): PressureState {
   return {
     cfg,
     seed: randomSeed(),
-    distanceFt: cfg.distance === 'ladder' ? 3 : cfg.distance,
-    clock: 0,
-    streak: 0,
-    bestStreak: 0,
-    lives: cfg.lives,
+    startAngle: randomAngle(),
+    ballIdx: 0,
+    run: 0,
+    bestRun: 0,
     makes: 0,
     attempts: 0,
-    ladderRun: 0,
+    holes: 1,
     faceAngles: [],
     history: [],
     status: 'playing',
   };
 }
 
-export const cupMultiplierForStreak = (streak: number) => Math.max(0.6, 1 - 0.04 * streak);
+/** Ball i of the circle (0–11), clockwise. */
+export function circleBall(s: PressureState, i: number) {
+  return ballFromLayout(s.cfg.radius, s.startAngle + (i * 2 * Math.PI) / CIRCLE_BALLS);
+}
 
 export function pressureLayout(s: PressureState): PuttLayout {
   return {
     seed: s.seed,
     difficulty: s.cfg.difficulty,
-    distanceFt: s.distanceFt,
-    angleRad: (s.clock * Math.PI) / 6,
-    holeRadiusMultiplier: cupMultiplierForStreak(s.streak),
+    distanceFt: s.cfg.radius,
+    angleRad: s.startAngle + (s.ballIdx * 2 * Math.PI) / CIRCLE_BALLS,
+    holeRadiusMultiplier: 1,
+    ball: circleBall(s, s.ballIdx),
   };
 }
 
 export function pressureOnShot(s: PressureState, shot: PuttingShotData): { state: PressureState; event: DrillEvent } {
-  if (s.status !== 'playing') return { state: s, event: { kind: 'game-over', title: 'Game over' } };
+  if (s.status !== 'playing') return { state: s, event: { kind: 'game-over', title: 'Level complete' } };
   const n: PressureState = {
     ...s,
     attempts: s.attempts + 1,
     // Start line against the chosen line (the Square measures start direction, not face).
     faceAngles: [...s.faceAngles, shot.startLineErrorDeg ?? shot.hla],
     history: [...s.history, shot.isHoled],
-    clock: (s.clock + 5) % 12, // jump around the clock so consecutive breaks differ
   };
   let event: DrillEvent;
   if (shot.isHoled) {
     n.makes++;
-    n.streak++;
-    n.bestStreak = Math.max(n.bestStreak, n.streak);
-    n.ladderRun++;
-    event = { kind: 'make', title: `${n.streak} in a row`, detail: `Cup now ${(4.25 * cupMultiplierForStreak(n.streak)).toFixed(2)}″` };
-    if (s.cfg.distance === 'ladder' && n.ladderRun >= 3 && n.distanceFt < 8) {
-      n.distanceFt++;
-      n.ladderRun = 0;
-      event = { kind: 'level-up', title: `Up to ${n.distanceFt} ft`, detail: 'Three straight — moving back' };
-    }
-    if (PRESSURE_MILESTONES.includes(n.streak)) {
-      event = { kind: 'milestone', title: `${n.streak} straight!`, detail: 'Milestone streak' };
+    n.run++;
+    n.bestRun = Math.max(n.bestRun, n.run);
+    n.ballIdx = (s.ballIdx + 1) % CIRCLE_BALLS;
+    const left = CIRCLE_BALLS - n.ballIdx;
+    event = { kind: 'make', title: `${n.run} in a row`, detail: n.ballIdx === 0 ? undefined : `${left} to go in this set` };
+    if (n.run >= CIRCLE_GOAL) {
+      n.status = 'won';
+      event = { kind: 'win', title: `${CIRCLE_GOAL} in a row!`, detail: `${s.cfg.radius} ft level complete` };
+    } else if (n.run === 24) {
+      event = { kind: 'mega', title: '24 in a row!', detail: 'Same hole — 12 more for the level' };
+    } else if (n.run % CIRCLE_BALLS === 0) {
+      event = { kind: 'milestone', title: `${n.run} in a row!`, detail: 'Same hole — 12 new balls' };
     }
   } else {
-    n.lives--;
-    n.streak = 0;
-    n.ladderRun = 0;
-    if (s.cfg.distance === 'ladder') n.distanceFt = Math.max(3, n.distanceFt - 1);
-    const how = shot.lipOut ? 'Lipped out' : shot.distanceErrorFt < 0 ? 'Short' : Math.abs(shot.lateralErrorInches) > 2 ? (shot.lateralErrorInches > 0 ? 'Missed right' : 'Missed left') : 'Missed';
-    event = {
-      kind: shot.lipOut ? 'lip' : 'miss',
-      title: how,
-      detail: n.lives > 0 ? `${n.lives} ${n.lives === 1 ? 'life' : 'lives'} left` : undefined,
-    };
-    if (n.lives <= 0) {
-      n.status = 'over';
-      event = { kind: 'game-over', title: 'Game over', detail: `${n.makes}/${n.attempts} made · best streak ${n.bestStreak}` };
-    }
+    // Miss: back to ball 1, on a different hole
+    n.run = 0;
+    n.ballIdx = 0;
+    n.seed = randomSeed();
+    n.startAngle = randomAngle();
+    n.holes++;
+    const how = shot.lipOut ? 'Lipped out' : shot.offGreen ? 'Off the green' : shot.distanceErrorFt < 0 ? 'Short' : Math.abs(shot.lateralErrorInches) > 2 ? (shot.lateralErrorInches > 0 ? 'Missed right' : 'Missed left') : 'Missed';
+    event = { kind: shot.lipOut ? 'lip' : 'miss', title: how, detail: s.run > 0 ? `Run ended at ${s.run} · new hole` : 'New hole' };
   }
   return { state: n, event };
 }
 
 export const pressureFaceStdDev = (s: PressureState) => calculateStdDev(s.faceAngles);
 
-/* ================================= Speed Control ================================= */
+/* ============================ Leapfrog (pace control) ============================ */
+/*
+ * All putts from one spot along a 30 ft ladder (no cup). The first ball must finish past the
+ * 3 ft rung; each next ball just past the previous one, as close to it as possible. A ball that
+ * finishes short of the previous one, or beyond the 30 ft line, ends the round: the score is how
+ * many balls you fitted in. Trains feel for small, incremental changes in distance.
+ */
 
-export interface LagConfig {
-  distance: 20 | 30 | 50 | 'mixed';
-  putts: 10 | 15;
+export const LEAP_START_FT = 3;
+export const LEAP_END_FT = 30;
+
+export interface LeapConfig {
   difficulty: SlopeDifficulty;
 }
 
-export type LagZone = 'holed' | 'zone' | 'close-short' | 'long' | 'short' | 'way-long';
-
-export interface LagResult {
-  distanceFt: number;
-  leaveFt: number;
-  distanceErrorFt: number;
-  zone: LagZone;
-  points: number;
+export interface LeapBall {
+  x: number;
+  z: number;
+  /** Distance along the ladder from the start spot (ft). */
+  ft: number;
 }
 
-export interface LagState {
-  cfg: LagConfig;
+export interface LeapState {
+  cfg: LeapConfig;
   seed: number;
-  distances: number[];
-  angles: number[];
-  idx: number;
-  results: LagResult[];
-  score: number;
-  combo: number;
-  bestCombo: number;
-  status: 'playing' | 'over';
+  angleRad: number;
+  balls: LeapBall[];
+  best: number;
+  /** Best before this round started (to celebrate beating it once). */
+  bestBefore: number;
+  rounds: number;
+  scores: number[];
+  status: 'playing';
 }
 
-export const LAG_ZONE_FT = 3;
-
-export function newLag(cfg: LagConfig): LagState {
-  const rnd = mulberry32(randomSeed());
-  const distances = Array.from({ length: cfg.putts }, () =>
-    cfg.distance === 'mixed' ? Math.round(20 + rnd() * 30) : cfg.distance
-  );
-  const angles = Array.from({ length: cfg.putts }, () => (rnd() - 0.5) * Math.PI * 1.6);
-  return { cfg, seed: randomSeed(), distances, angles, idx: 0, results: [], score: 0, combo: 0, bestCombo: 0, status: 'playing' };
+export function newLeap(cfg: LeapConfig): LeapState {
+  return { cfg, seed: randomSeed(), angleRad: Math.random() * Math.PI * 2, balls: [], best: 0, bestBefore: 0, rounds: 1, scores: [], status: 'playing' };
 }
 
-export function lagLayout(s: LagState): PuttLayout {
-  const i = Math.min(s.idx, s.distances.length - 1);
-  return { seed: s.seed, difficulty: s.cfg.difficulty, distanceFt: s.distances[i], angleRad: s.angles[i], holeRadiusMultiplier: 1 };
+export function leapLayout(s: LeapState): PuttLayout {
+  // The ladder runs from the ball toward the (hidden, cupless) pin 30 ft away.
+  return { seed: s.seed, difficulty: s.cfg.difficulty, distanceFt: LEAP_END_FT, angleRad: s.angleRad, holeRadiusMultiplier: 0 };
 }
 
-export function classifyLag(shot: PuttingShotData): { zone: LagZone; points: number } {
-  if (shot.isHoled) return { zone: 'holed', points: 5 };
-  const leave = shot.leaveFt;
-  const past = shot.distanceErrorFt >= 0;
-  if (leave <= LAG_ZONE_FT && past) return { zone: 'zone', points: 3 };
-  if (leave <= LAG_ZONE_FT) return { zone: 'close-short', points: 1 };
-  if (!past) return { zone: 'short', points: -1 };
-  if (leave <= 6) return { zone: 'long', points: 0 };
-  return { zone: 'way-long', points: -1 };
+/** Where a putt finished along the ladder (ft from the start spot, toward the 30 ft line). */
+export function leapDistanceFt(shot: PuttingShotData): number {
+  const st = shot.ballStart;
+  const d = Math.hypot(st.x, st.z) || 1;
+  const ux = -st.x / d;
+  const uz = -st.z / d;
+  return ((shot.rest.x - st.x) * ux + (shot.rest.z - st.z) * uz) * 3.28084;
 }
 
-export function lagOnShot(s: LagState, shot: PuttingShotData): { state: LagState; event: DrillEvent } {
-  if (s.status !== 'playing') return { state: s, event: { kind: 'game-over', title: 'Set complete' } };
-  const { zone, points } = classifyLag(shot);
-  const good = zone === 'holed' || zone === 'zone';
-  const combo = good ? s.combo + 1 : 0;
-  const bonus = good && combo >= 3 ? 1 : 0;
-  const result: LagResult = {
-    distanceFt: s.distances[s.idx],
-    leaveFt: shot.leaveFt,
-    distanceErrorFt: shot.distanceErrorFt,
-    zone,
-    points: points + bonus,
-  };
-  const n: LagState = {
-    ...s,
-    idx: s.idx + 1,
-    results: [...s.results, result],
-    score: s.score + result.points,
-    combo,
-    bestCombo: Math.max(s.bestCombo, combo),
-  };
-  if (n.idx >= s.distances.length) n.status = 'over';
-  const titles: Record<LagZone, string> = {
-    holed: 'Holed it!',
-    zone: 'In the zone',
-    'close-short': 'Close — but short',
-    long: 'A bit firm',
-    short: 'Short',
-    'way-long': 'Way too firm',
-  };
-  const sign = result.points > 0 ? `+${result.points}` : `${result.points}`;
-  let event: DrillEvent = {
-    kind: good ? 'zone' : zone === 'short' || zone === 'close-short' ? 'short' : 'long',
-    title: titles[zone],
-    detail: `${sign} pts${bonus ? ` · combo ×${combo}` : ''} · left ${shot.leaveFt.toFixed(1)} ft`,
-  };
-  if (zone === 'holed') event = { kind: 'make', title: titles.holed, detail: `${sign} pts` };
-  if (n.status === 'over') {
-    event = { kind: 'game-over', title: `Set complete: ${n.score} pts`, detail: `${n.results.filter((r) => r.zone === 'zone' || r.zone === 'holed').length}/${n.results.length} in the zone` };
+export function leapOnShot(s: LeapState, shot: PuttingShotData): { state: LeapState; event: DrillEvent } {
+  const ft = leapDistanceFt(shot);
+  const last = s.balls.length ? s.balls[s.balls.length - 1].ft : LEAP_START_FT;
+  const ok = !shot.offGreen && ft > last && ft <= LEAP_END_FT;
+  if (ok) {
+    const balls = [...s.balls, { x: shot.rest.x, z: shot.rest.z, ft }];
+    const n = balls.length;
+    const gapIn = (ft - last) * 12;
+    let event: DrillEvent = {
+      kind: 'make',
+      title: `${n} ${n === 1 ? 'ball' : 'balls'}`,
+      detail: s.balls.length ? `${gapIn < 12 ? `${Math.round(gapIn)} in` : `${(gapIn / 12).toFixed(1)} ft`} past the last · ${(LEAP_END_FT - ft).toFixed(1)} ft of room left` : `Past the ${LEAP_START_FT} ft rung · ${(LEAP_END_FT - ft).toFixed(1)} ft of room left`,
+    };
+    if (s.bestBefore >= 3 && n === s.bestBefore + 1) event = { kind: 'milestone', title: `New best: ${n}`, detail: event.detail };
+    else if (n % 10 === 0) event = { kind: 'milestone', title: `${n} balls!`, detail: event.detail };
+    return { state: { ...s, balls, best: Math.max(s.best, n) }, event };
   }
-  return { state: n, event };
-}
-
-export function lagStats(s: LagState) {
-  const errs = s.results.map((r) => r.distanceErrorFt);
-  const inZone = s.results.filter((r) => r.zone === 'zone' || r.zone === 'holed').length;
-  const shortCount = s.results.filter((r) => r.zone === 'short' || r.zone === 'close-short').length;
-  const threePuttRisk = s.results.filter((r) => r.leaveFt > 6).length;
-  return { distanceStdDevFt: calculateStdDev(errs), inZone, shortCount, threePuttRisk };
-}
-
-export function lagRating(score: number, putts: number) {
-  const per = score / putts;
-  if (per >= 3) return 'eagle' as const;
-  if (per >= 2.2) return 'birdie' as const;
-  if (per >= 1.4) return 'par' as const;
-  return 'bogey' as const;
+  // Round over: score it and start again
+  const score = s.balls.length;
+  const why = shot.offGreen
+    ? 'Off the green'
+    : ft > LEAP_END_FT
+    ? `Past the ${LEAP_END_FT} ft line`
+    : s.balls.length
+    ? `Short of the last ball by ${Math.round((last - ft) * 12)} in`
+    : `Short of the ${LEAP_START_FT} ft rung`;
+  return {
+    // Each new round is on a different green, from a different direction.
+    state: { ...s, seed: randomSeed(), angleRad: Math.random() * Math.PI * 2, balls: [], rounds: s.rounds + 1, scores: [...s.scores, score], best: Math.max(s.best, score), bestBefore: Math.max(s.best, score) },
+    event: { kind: ft > LEAP_END_FT ? 'long' : 'short', title: why, detail: `Score ${score} · new green` },
+  };
 }
 
 /* ================================== The Scramble ================================== */
@@ -343,6 +321,10 @@ export function scrambleOnShot(s: ScrambleState, shot: PuttingShotData): { state
   if (shot.isHoled) {
     finalStrokes = strokes;
     event = { kind: 'make', title: strokes === 1 ? 'Birdie! One-putt' : `Holed — ${strokes} putts` };
+  } else if (shot.offGreen) {
+    // Rolled off the green: the hole ends here — never putt from off the surface. Counts +1.
+    finalStrokes = Math.min(MAX_STROKES, strokes + 1);
+    event = { kind: 'miss', title: 'Off the green', detail: 'Hole over · +1 stroke' };
   } else if (shot.leaveFt <= gimme) {
     finalStrokes = strokes + 1;
     event = { kind: 'gimme', title: `Inside the gimme (${gimme.toFixed(1)} ft)`, detail: `${finalStrokes} putts` };

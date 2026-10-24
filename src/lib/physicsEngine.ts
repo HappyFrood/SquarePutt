@@ -64,6 +64,8 @@ export interface PuttSetup {
   holeRadiusMultiplier?: number;
   /** Multiplier applied to measured ball speed to calibrate a launch monitor (1 = none). */
   speedCalibration?: number;
+  /** Where the putting surface is (used to end a putt that leaves the green; not by the physics). */
+  onGreen?: (x: number, z: number) => boolean;
 }
 
 export interface StrokeInput {
